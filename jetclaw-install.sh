@@ -245,6 +245,10 @@ run_shell() {
 verify() {
     local desc="$1"
     shift
+    if $DRY_RUN; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Verify: $desc"
+        return
+    fi
     local output
     if output=$("$@" 2>&1); then
         success "$desc"
@@ -258,6 +262,10 @@ verify() {
 verify_shell() {
     local desc="$1"
     shift
+    if $DRY_RUN; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Verify: $desc"
+        return
+    fi
     local output
     if output=$(eval "$@" 2>&1); then
         success "$desc"
