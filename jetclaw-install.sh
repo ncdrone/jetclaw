@@ -939,32 +939,36 @@ if ! $SKIP_TAILSCALE; then
         success "SSH restricted to Tailscale network"
     fi
 
-    echo ""
-    info "SSH key setup -- run these on your Mac:"
-    echo ""
-    echo -e "  ${BOLD}# 1. Generate a dedicated SSH key${NC}"
-    echo "  ssh-keygen -t ed25519 -C \"$HOSTNAME_NEW\" -f ~/.ssh/id_ed25519_$HOSTNAME_NEW"
-    echo ""
-    echo -e "  ${BOLD}# 2. Copy it to the Jetson${NC}"
-    echo "  ssh-copy-id -i ~/.ssh/id_ed25519_$HOSTNAME_NEW.pub $ADMIN_USER@$(tailscale ip -4 2>/dev/null || echo '<jetson-ip>')"
-    echo ""
-    echo -e "  ${BOLD}# 3. Add to macOS keychain${NC}"
-    echo "  ssh-add --apple-use-keychain ~/.ssh/id_ed25519_$HOSTNAME_NEW"
-    echo ""
+    TS_IP_CURRENT=$(tailscale ip -4 2>/dev/null || echo '<jetson-ip>')
+    TS_HOST="${TS_FQDN:-$HOSTNAME_NEW.your-tailnet.ts.net}"
 
-    info "Then add this to your Mac's ~/.ssh/config (copy-paste this block):"
     echo ""
-    echo -e "${GREEN}--- COPY BELOW THIS LINE ---${NC}"
+    info "Run these commands on your Mac to set up SSH access:"
     echo ""
-    echo "Host $HOSTNAME_NEW"
-    echo "    HostName ${TS_FQDN:-$HOSTNAME_NEW.your-tailnet.ts.net}"
-    echo "    User $ADMIN_USER"
-    echo "    IdentityFile ~/.ssh/id_ed25519_$HOSTNAME_NEW"
-    echo "    IdentitiesOnly yes"
-    echo "    ServerAliveInterval 30"
-    echo "    ServerAliveCountMax 3"
+    echo -e "  ${BOLD}# 1. Generate key, copy to Jetson, add to keychain, and configure SSH${NC}"
+    echo -e "  ${BOLD}#    Copy this entire block and paste into your Mac terminal:${NC}"
     echo ""
-    echo -e "${GREEN}--- COPY ABOVE THIS LINE ---${NC}"
+    echo -e "${GREEN}--- COPY FROM HERE ---${NC}"
+    echo ""
+    cat <<SSHBLOCK
+ssh-keygen -t ed25519 -C "$HOSTNAME_NEW" -f ~/.ssh/id_ed25519_$HOSTNAME_NEW
+ssh-copy-id -i ~/.ssh/id_ed25519_$HOSTNAME_NEW.pub $ADMIN_USER@$TS_IP_CURRENT
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519_$HOSTNAME_NEW
+cat >> ~/.ssh/config << 'EOF'
+
+Host $HOSTNAME_NEW
+    HostName $TS_HOST
+    User $ADMIN_USER
+    IdentityFile ~/.ssh/id_ed25519_$HOSTNAME_NEW
+    IdentitiesOnly yes
+    ServerAliveInterval 30
+    ServerAliveCountMax 3
+EOF
+SSHBLOCK
+    echo ""
+    echo -e "${GREEN}--- TO HERE ---${NC}"
+    echo ""
+    info "After running the above, test with: ssh $HOSTNAME_NEW"
     echo ""
 
     pause_continue "Press Enter to continue to user setup..."
