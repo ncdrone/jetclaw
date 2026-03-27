@@ -623,7 +623,10 @@ fi
 if [[ -z "$WORKSPACE_TEMPLATE" ]]; then
     if prompt_yn "Copy in a workspace template (personality files, etc.)?" "n"; then
         prompt_value WORKSPACE_TEMPLATE "Path to workspace template directory"
-        [[ -d "$WORKSPACE_TEMPLATE" ]] || fatal "Directory not found: $WORKSPACE_TEMPLATE"
+        if [[ ! -d "$WORKSPACE_TEMPLATE" ]]; then
+            warn "Directory not found: $WORKSPACE_TEMPLATE -- skipping workspace template."
+            WORKSPACE_TEMPLATE=""
+        fi
     fi
 fi
 
@@ -660,7 +663,7 @@ if ! $SKIP_NGINX; then
 fi
 
 if ! $SKIP_POSTGRES; then
-    if ! prompt_yn "Install PostgreSQL?" "n"; then
+    if ! prompt_yn "Install PostgreSQL?" "y"; then
         SKIP_POSTGRES=true
     fi
 fi
