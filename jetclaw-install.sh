@@ -638,39 +638,48 @@ echo "  The full install includes: system hardening, Tailscale, Docker,"
 echo "  Nginx, PostgreSQL, Chromium, and OpenClaw."
 echo ""
 
-if ! $SKIP_HARDENING; then
-    if ! prompt_yn "Run system hardening? (UFW, SSH lockdown, Quad9 DNS, fail2ban)" "y"; then
-        SKIP_HARDENING=true
-    fi
-fi
+INSTALL_ALL=false
+if prompt_yn "Install everything? (say No to choose individually)" "y"; then
+    INSTALL_ALL=true
+    info "Installing all components."
+else
+    info "Choose which components to install:"
+    echo ""
 
-if ! $SKIP_TAILSCALE; then
-    if ! prompt_yn "Install/configure Tailscale?" "y"; then
-        SKIP_TAILSCALE=true
+    if ! $SKIP_HARDENING; then
+        if ! prompt_yn "  System hardening? (UFW, SSH lockdown, Quad9 DNS, fail2ban)" "y"; then
+            SKIP_HARDENING=true
+        fi
     fi
-fi
 
-if ! $SKIP_DOCKER; then
-    if ! prompt_yn "Install Docker?" "y"; then
-        SKIP_DOCKER=true
+    if ! $SKIP_TAILSCALE; then
+        if ! prompt_yn "  Tailscale?" "y"; then
+            SKIP_TAILSCALE=true
+        fi
     fi
-fi
 
-if ! $SKIP_NGINX; then
-    if ! prompt_yn "Install Nginx (for reverse-proxying apps)?" "y"; then
-        SKIP_NGINX=true
+    if ! $SKIP_DOCKER; then
+        if ! prompt_yn "  Docker?" "y"; then
+            SKIP_DOCKER=true
+        fi
     fi
-fi
 
-if ! $SKIP_POSTGRES; then
-    if ! prompt_yn "Install PostgreSQL?" "y"; then
-        SKIP_POSTGRES=true
+    if ! $SKIP_NGINX; then
+        if ! prompt_yn "  Nginx (reverse proxy for apps)?" "y"; then
+            SKIP_NGINX=true
+        fi
     fi
-fi
 
-if ! $SKIP_CHROMIUM; then
-    if ! prompt_yn "Install Chromium (needed for browser tools/research skill)?" "y"; then
-        SKIP_CHROMIUM=true
+    if ! $SKIP_POSTGRES; then
+        if ! prompt_yn "  PostgreSQL?" "y"; then
+            SKIP_POSTGRES=true
+        fi
+    fi
+
+    if ! $SKIP_CHROMIUM; then
+        if ! prompt_yn "  Chromium (browser tools/research skill)?" "y"; then
+            SKIP_CHROMIUM=true
+        fi
     fi
 fi
 
