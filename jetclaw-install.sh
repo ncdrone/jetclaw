@@ -297,7 +297,7 @@ config = {
         "profiles": {
             "anthropic:default": {
                 "provider": "anthropic",
-                "mode": "token"
+                "mode": "api_key"
             }
         },
         "order": {
@@ -383,8 +383,8 @@ config = {
                 "bootstrap-extra-files": {"enabled": True, "paths": ["meta-frameworks/*.md"]},
                 "session-memory": {"enabled": True},
                 "command-logger": {"enabled": True},
-                "qmd-recall": {"enabled": True},
-                "framework-loader": {"enabled": True}
+                "qmd-recall": {"enabled": False}
+
             }
         }
     }
@@ -442,9 +442,12 @@ generate_auth_file() {
     python3 <<PYEOF
 import json, os
 print(json.dumps({
-    "provider": "anthropic",
-    "mode": "token",
-    "token": os.environ["OC_API_KEY"]
+    "anthropic:default": {
+        "provider": "anthropic",
+        "mode": "api_key",
+        "key": os.environ["OC_API_KEY"]
+    },
+    "usageStats": {}
 }, indent=2))
 PYEOF
 }
@@ -873,7 +876,7 @@ F2BEOF
     # -- 1.7 Kill services ---------------------------------------------------
     info "Step 7/8: Disabling unnecessary services..."
     for svc in avahi-daemon cups bluetooth ModemManager rpcbind rpcbind.socket; do
-        sudo systemctl disable --now "$svc" 2>/dev/null || true
+        run_cmd sudo systemctl disable --now "$svc" 2>/dev/null || true
     done
     success "Disabled: avahi, cups, bluetooth, ModemManager, rpcbind"
 
@@ -964,8 +967,8 @@ if ! $SKIP_TAILSCALE; then
 
         pause_confirm "Your Mac is on Tailscale and you can reach this machine?"
 
-        sudo ufw delete allow from 192.168.0.0/16 to any port 22 2>/dev/null || true
-        sudo ufw delete allow from 10.0.0.0/8 to any port 22 2>/dev/null || true
+        run_shell "sudo ufw delete allow from 192.168.0.0/16 to any port 22 2>/dev/null || true"
+        run_shell "sudo ufw delete allow from 10.0.0.0/8 to any port 22 2>/dev/null || true"
         run_shell "sudo ufw allow from 100.64.0.0/10 to any port 22"
         success "SSH restricted to Tailscale network"
     fi
@@ -1136,8 +1139,8 @@ if ! $SKIP_DOCKER; then
     fi
 
     info "Adding users to docker group..."
-    sudo usermod -aG docker "$ADMIN_USER" 2>/dev/null || true
-    sudo usermod -aG docker "$SERVICE_USER" 2>/dev/null || true
+    run_cmd sudo usermod -aG docker "$ADMIN_USER" 2>/dev/null || true
+    run_cmd sudo usermod -aG docker "$SERVICE_USER" 2>/dev/null || true
 
     if ! $DRY_RUN; then
         if [[ ! -f /etc/docker/daemon.json ]] || ! grep -q "no-new-privileges" /etc/docker/daemon.json 2>/dev/null; then
@@ -1405,7 +1408,7 @@ fi
 info "Setting file permissions..."
 run_cmd sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$USER_HOME"
 run_cmd sudo chmod 700 "$OPENCLAW_DIR"
-sudo chmod 600 "$OPENCLAW_DIR/openclaw.json" 2>/dev/null || true
+run_cmd sudo chmod 600 "$OPENCLAW_DIR/openclaw.json" 2>/dev/null || true
 success "File permissions locked down"
 
 # -- 4.6 Check for accidental .openclaw in admin home ----------------------
@@ -1660,11 +1663,13 @@ fi
 echo ""
 echo -e "  ${BOLD}Next Steps:${NC}"
 echo ""
-echo "  1. ${BOLD}Read the gateway token:${NC}"
+STEP=1
+echo "  $STEP. ${BOLD}Read the gateway token:${NC}"
 echo "     ssh $HOSTNAME_NEW"
 echo "     sudo cat $SECRETS_DIR/gateway-token"
 echo ""
-echo "  2. ${BOLD}Pair your browser${NC} (first time, via SSH tunnel):"
+((STEP++))
+echo "  $STEP. ${BOLD}Pair your browser${NC} (first time, via SSH tunnel):"
 echo "     On your Mac, open two terminals:"
 echo "       Terminal 1: ssh -N -L $GATEWAY_PORT:127.0.0.1:$GATEWAY_PORT $ADMIN_USER@$HOSTNAME_NEW"
 echo "       Terminal 2: open \"http://localhost:$GATEWAY_PORT/?token=YOUR_TOKEN\""
@@ -1672,7 +1677,8 @@ echo "     The tunnel is supposed to hang (that's the -N flag)."
 echo ""
 
 if [[ -n "${TS_FQDN:-}" ]]; then
-    echo "  3. ${BOLD}Enable Tailscale dashboard access${NC}:"
+    ((STEP++))
+    echo "  $STEP. ${BOLD}Enable Tailscale dashboard access${NC}:"
     echo "     In the localhost dashboard: Config > Gateway > Auth > 'Allow Tailscale'"
     echo "     Then approve your browser:"
     echo "       sudo -u $SERVICE_USER openclaw devices list"
@@ -1682,17 +1688,20 @@ if [[ -n "${TS_FQDN:-}" ]]; then
     echo ""
 fi
 
-echo "  4. ${BOLD}Manage the service:${NC}"
+((STEP++))
+echo "  $STEP. ${BOLD}Manage the service:${NC}"
 echo "       sudo systemctl status $SYSTEMD_SERVICE"
 echo "       sudo journalctl -u $SYSTEMD_SERVICE -f"
 echo "       sudo systemctl restart $SYSTEMD_SERVICE"
 echo ""
-echo "  5. ${BOLD}Run commands as $SERVICE_USER:${NC}"
+((STEP++))
+echo "  $STEP. ${BOLD}Run commands as $SERVICE_USER:${NC}"
 echo "       sudo -u $SERVICE_USER openclaw <command>"
 echo ""
 
 if [[ -n "$TELEGRAM_TOKEN" ]]; then
-    echo "  6. ${BOLD}Pair Telegram:${NC}"
+    ((STEP++))
+    echo "  $STEP. ${BOLD}Pair Telegram:${NC}"
     echo "       Message your bot on Telegram, then approve:"
     echo "       sudo -u $SERVICE_USER openclaw pairing list telegram"
     echo "       sudo -u $SERVICE_USER openclaw pairing approve telegram <code>"
