@@ -1026,7 +1026,8 @@ if ! $SKIP_TAILSCALE; then
     fi
 
     # Check if Tailscale is already connected
-    if tailscale status &>/dev/null; then
+    TS_STATE=$(tailscale status --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('BackendState',''))" 2>/dev/null || echo "")
+    if [[ "$TS_STATE" == "Running" ]]; then
         success "Tailscale already connected"
     else
         info "Bringing Tailscale up..."
@@ -1039,7 +1040,7 @@ if ! $SKIP_TAILSCALE; then
             action_required "When the URL appears, open it in your browser and log in\n  to your Tailscale account to authorize this machine."
 
             pause_confirm "Ready to run 'tailscale up'?"
-            run_cmd sudo tailscale up --ssh
+            sudo tailscale up --ssh --reset || sudo tailscale up --ssh --operator="$SERVICE_USER" || warn "Tailscale up had issues. May already be configured."
         fi
     fi
 
