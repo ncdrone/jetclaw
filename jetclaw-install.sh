@@ -619,7 +619,7 @@ echo ""
 echo "  These are used to personalize the agent's meta-frameworks."
 echo ""
 prompt_value DISPLAY_NAME "What should the agent call you? (your first name)" ""
-prompt_value COMPANY_NAME "Company/organization name (or leave blank)" ""
+read -rp "  Company/organization name (or leave blank): " COMPANY_NAME
 
 echo ""
 echo -e "${BOLD}--- Optional Features ---${NC}"
@@ -1361,7 +1361,7 @@ echo ""
 info "OpenClaw interactive onboarding can finalize setup and validate config."
 echo ""
 
-if prompt_yn "Run 'openclaw onboard' now? (recommended for first install)" "y"; then
+if $INSTALL_ALL || prompt_yn "Run 'openclaw onboard' now? (recommended for first install)" "y"; then
     # Backup the generated config before onboarding potentially overwrites it
     if ! $DRY_RUN && [[ -f "$OPENCLAW_DIR/openclaw.json" ]]; then
         sudo -u "$SERVICE_USER" cp "$OPENCLAW_DIR/openclaw.json" "$OPENCLAW_DIR/openclaw.json.pre-onboard"
@@ -1424,63 +1424,59 @@ else
     info "No workspace template provided (skipping)"
 fi
 
-# -- 4.8 Meta-frameworks (from jetclaw-comms) ------------------------------
+# -- 4.8 Meta-frameworks (from jetclaw templates/) -------------------------
 echo ""
-if prompt_yn "Install meta-frameworks from jetclaw-comms? (operational philosophy templates)" "y"; then
-    COMMS_REPO="https://github.com/ncdrone/jetclaw-comms.git"
-    META_TMP=$(mktemp -d)
+# Find the templates directory relative to where the script lives
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEMPLATES_SRC="$SCRIPT_DIR/templates/meta-frameworks"
 
+if $INSTALL_ALL || prompt_yn "Install meta-frameworks? (operational philosophy templates)" "y"; then
     if ! $DRY_RUN; then
-        info "Pulling meta-framework templates..."
-        if git clone --depth 1 --quiet "$COMMS_REPO" "$META_TMP" 2>/dev/null; then
-            TEMPLATES_SRC="$META_TMP/shared/templates/meta-frameworks"
-            if [[ -d "$TEMPLATES_SRC" ]]; then
-                sudo -u "$SERVICE_USER" mkdir -p "$WORKSPACE_DIR/meta-frameworks"
+        if [[ -d "$TEMPLATES_SRC" ]]; then
+            sudo -u "$SERVICE_USER" mkdir -p "$WORKSPACE_DIR/meta-frameworks"
 
-                # Copy all template files
-                for f in "$TEMPLATES_SRC"/*.md; do
-                    [[ -f "$f" ]] || continue
-                    fname=$(basename "$f")
-                    [[ "$fname" == "README.md" ]] && continue
-                    sudo cp "$f" "$WORKSPACE_DIR/meta-frameworks/$fname"
-                done
+            # Copy all template files (skip README)
+            for f in "$TEMPLATES_SRC"/*.md; do
+                [[ -f "$f" ]] || continue
+                fname=$(basename "$f")
+                [[ "$fname" == "README.md" ]] && continue
+                sudo cp "$f" "$WORKSPACE_DIR/meta-frameworks/$fname"
+            done
 
-                # Replace placeholders with actual values
-                AGENT_DISPLAY="${SERVICE_USER^}"  # capitalize first letter
-                info "Customizing meta-frameworks..."
-                info "  {agent} → $AGENT_DISPLAY"
-                info "  {user} → ${DISPLAY_NAME:-$ADMIN_USER}"
-                if [[ -n "${COMPANY_NAME:-}" ]]; then
-                    info "  {company} → $COMPANY_NAME"
-                fi
-
-                for f in "$WORKSPACE_DIR/meta-frameworks"/*.md; do
-                    [[ -f "$f" ]] || continue
-                    sudo sed -i "s/{agent}/$AGENT_DISPLAY/g" "$f"
-                    sudo sed -i "s/{user}/${DISPLAY_NAME:-$ADMIN_USER}/g" "$f"
-                    if [[ -n "${COMPANY_NAME:-}" ]]; then
-                        sudo sed -i "s/{company}/$COMPANY_NAME/g" "$f"
-                    fi
-                    if [[ -n "${DOMAIN:-}" ]]; then
-                        sudo sed -i "s/{domain}/$DOMAIN/g" "$f"
-                    fi
-                done
-
-                sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$WORKSPACE_DIR/meta-frameworks"
-                success "Meta-frameworks installed and customized"
-                echo "  Files:"
-                ls "$WORKSPACE_DIR/meta-frameworks/"*.md 2>/dev/null | while read -r f; do
-                    echo "    $(basename "$f")"
-                done
-            else
-                warn "Meta-framework templates not found in jetclaw-comms"
+            # Replace placeholders with actual values using | as sed delimiter
+            # (avoids issues if values contain / or &)
+            AGENT_DISPLAY="${SERVICE_USER^}"  # capitalize first letter
+            info "Customizing meta-frameworks..."
+            info "  {agent} → $AGENT_DISPLAY"
+            info "  {user} → ${DISPLAY_NAME:-$ADMIN_USER}"
+            if [[ -n "${COMPANY_NAME:-}" ]]; then
+                info "  {company} → $COMPANY_NAME"
             fi
+
+            for f in "$WORKSPACE_DIR/meta-frameworks"/*.md; do
+                [[ -f "$f" ]] || continue
+                sudo sed -i "s|{agent}|$AGENT_DISPLAY|g" "$f"
+                sudo sed -i "s|{user}|${DISPLAY_NAME:-$ADMIN_USER}|g" "$f"
+                if [[ -n "${COMPANY_NAME:-}" ]]; then
+                    sudo sed -i "s|{company}|$COMPANY_NAME|g" "$f"
+                fi
+                if [[ -n "${DOMAIN:-}" ]]; then
+                    sudo sed -i "s|{domain}|$DOMAIN|g" "$f"
+                fi
+            done
+
+            sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$WORKSPACE_DIR/meta-frameworks"
+            success "Meta-frameworks installed and customized"
+            echo "  Files:"
+            ls "$WORKSPACE_DIR/meta-frameworks/"*.md 2>/dev/null | while read -r f; do
+                echo "    $(basename "$f")"
+            done
         else
-            warn "Could not clone jetclaw-comms. You can add meta-frameworks manually later."
+            warn "Templates not found at: $TEMPLATES_SRC"
+            warn "Make sure you cloned the full jetclaw repo (not just the script)."
         fi
-        rm -rf "$META_TMP"
     else
-        echo -e "${YELLOW}[DRY-RUN]${NC} Clone jetclaw-comms, copy meta-frameworks to workspace, replace placeholders"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Copy meta-frameworks from $TEMPLATES_SRC to workspace, replace placeholders"
         echo -e "${YELLOW}[DRY-RUN]${NC}   {agent} → ${SERVICE_USER^}"
         echo -e "${YELLOW}[DRY-RUN]${NC}   {user} → ${DISPLAY_NAME:-$ADMIN_USER}"
         echo -e "${YELLOW}[DRY-RUN]${NC}   {company} → ${COMPANY_NAME:-<not set>}"
@@ -1543,7 +1539,7 @@ run_cmd sudo systemctl daemon-reload
 run_cmd sudo systemctl enable "$SYSTEMD_SERVICE"
 
 echo ""
-if prompt_yn "Start the gateway now?" "y"; then
+if $INSTALL_ALL || prompt_yn "Start the gateway now?" "y"; then
     run_cmd sudo systemctl start "$SYSTEMD_SERVICE"
 
     if ! $DRY_RUN; then
@@ -1625,11 +1621,11 @@ fi
 # Run openclaw doctor if gateway is up
 if ! $DRY_RUN && systemctl is-active --quiet "$SYSTEMD_SERVICE" 2>/dev/null; then
     echo ""
-    if prompt_yn "Run 'openclaw doctor' to validate the installation?" "y"; then
+    if $INSTALL_ALL || prompt_yn "Run 'openclaw doctor' to validate the installation?" "y"; then
         sudo -u "$SERVICE_USER" openclaw doctor --fix 2>/dev/null || warn "Doctor reported issues. Review output above."
     fi
 
-    if prompt_yn "Run 'openclaw security audit' to check security?" "y"; then
+    if $INSTALL_ALL || prompt_yn "Run 'openclaw security audit' to check security?" "y"; then
         sudo -u "$SERVICE_USER" openclaw security audit --deep 2>/dev/null || warn "Security audit reported issues. Review output above."
     fi
 fi
