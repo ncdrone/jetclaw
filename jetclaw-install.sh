@@ -53,6 +53,8 @@ TELEGRAM_TOKEN=""
 GITHUB_TOKEN=""
 GITHUB_EMAIL=""
 DOMAIN=""
+DISPLAY_NAME=""
+COMPANY_NAME=""
 DB_NAME=""
 DB_USER=""
 DB_PASS=""
@@ -372,6 +374,19 @@ config = {
         "redactPatterns": [
             "sk-ant-", "sk-", "password", "secret", "token", "api.key"
         ]
+    },
+    "hooks": {
+        "enabled": True,
+        "internal": {
+            "enabled": True,
+            "entries": {
+                "bootstrap-extra-files": {"enabled": True},
+                "session-memory": {"enabled": True},
+                "command-logger": {"enabled": True},
+                "qmd-recall": {"enabled": True},
+                "framework-loader": {"enabled": True}
+            }
+        }
     }
 }
 
@@ -597,6 +612,14 @@ if [[ "$API_KEY" == sk-ant-oat01-* ]]; then
     warn "You'll need to rotate it when it expires. Consider a regular API key for stability."
     pause_continue
 fi
+
+echo ""
+echo -e "${BOLD}--- Agent Identity ---${NC}"
+echo ""
+echo "  These are used to personalize the agent's meta-frameworks."
+echo ""
+prompt_value DISPLAY_NAME "What should the agent call you? (your first name)" ""
+prompt_value COMPANY_NAME "Company/organization name (or leave blank)" ""
 
 echo ""
 echo -e "${BOLD}--- Optional Features ---${NC}"
@@ -1399,6 +1422,71 @@ if [[ -n "$WORKSPACE_TEMPLATE" ]]; then
     fi
 else
     info "No workspace template provided (skipping)"
+fi
+
+# -- 4.8 Meta-frameworks (from jetclaw-comms) ------------------------------
+echo ""
+if prompt_yn "Install meta-frameworks from jetclaw-comms? (operational philosophy templates)" "y"; then
+    COMMS_REPO="https://github.com/ncdrone/jetclaw-comms.git"
+    META_TMP=$(mktemp -d)
+
+    if ! $DRY_RUN; then
+        info "Pulling meta-framework templates..."
+        if git clone --depth 1 --quiet "$COMMS_REPO" "$META_TMP" 2>/dev/null; then
+            TEMPLATES_SRC="$META_TMP/shared/templates/meta-frameworks"
+            if [[ -d "$TEMPLATES_SRC" ]]; then
+                sudo -u "$SERVICE_USER" mkdir -p "$WORKSPACE_DIR/meta-frameworks"
+
+                # Copy all template files
+                for f in "$TEMPLATES_SRC"/*.md; do
+                    [[ -f "$f" ]] || continue
+                    fname=$(basename "$f")
+                    [[ "$fname" == "README.md" ]] && continue
+                    sudo cp "$f" "$WORKSPACE_DIR/meta-frameworks/$fname"
+                done
+
+                # Replace placeholders with actual values
+                AGENT_DISPLAY="${SERVICE_USER^}"  # capitalize first letter
+                info "Customizing meta-frameworks..."
+                info "  {agent} → $AGENT_DISPLAY"
+                info "  {user} → ${DISPLAY_NAME:-$ADMIN_USER}"
+                if [[ -n "${COMPANY_NAME:-}" ]]; then
+                    info "  {company} → $COMPANY_NAME"
+                fi
+
+                for f in "$WORKSPACE_DIR/meta-frameworks"/*.md; do
+                    [[ -f "$f" ]] || continue
+                    sudo sed -i "s/{agent}/$AGENT_DISPLAY/g" "$f"
+                    sudo sed -i "s/{user}/${DISPLAY_NAME:-$ADMIN_USER}/g" "$f"
+                    if [[ -n "${COMPANY_NAME:-}" ]]; then
+                        sudo sed -i "s/{company}/$COMPANY_NAME/g" "$f"
+                    fi
+                    if [[ -n "${DOMAIN:-}" ]]; then
+                        sudo sed -i "s/{domain}/$DOMAIN/g" "$f"
+                    fi
+                done
+
+                sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$WORKSPACE_DIR/meta-frameworks"
+                success "Meta-frameworks installed and customized"
+                echo "  Files:"
+                ls "$WORKSPACE_DIR/meta-frameworks/"*.md 2>/dev/null | while read -r f; do
+                    echo "    $(basename "$f")"
+                done
+            else
+                warn "Meta-framework templates not found in jetclaw-comms"
+            fi
+        else
+            warn "Could not clone jetclaw-comms. You can add meta-frameworks manually later."
+        fi
+        rm -rf "$META_TMP"
+    else
+        echo -e "${YELLOW}[DRY-RUN]${NC} Clone jetclaw-comms, copy meta-frameworks to workspace, replace placeholders"
+        echo -e "${YELLOW}[DRY-RUN]${NC}   {agent} → ${SERVICE_USER^}"
+        echo -e "${YELLOW}[DRY-RUN]${NC}   {user} → ${DISPLAY_NAME:-$ADMIN_USER}"
+        echo -e "${YELLOW}[DRY-RUN]${NC}   {company} → ${COMPANY_NAME:-<not set>}"
+    fi
+else
+    info "Skipping meta-frameworks"
 fi
 
 success "=== OpenClaw installed ==="
