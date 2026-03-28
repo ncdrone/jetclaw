@@ -113,8 +113,8 @@ action_required() {
 pause_confirm() {
     local msg="${1:-Ready to continue?}"
     echo ""
-    read -rp "  $msg [y/N] " confirm
-    [[ "$confirm" =~ ^[Yy]$ ]] || { warn "Paused. Re-run when ready."; exit 0; }
+    read -rp "  $msg [Y/n] " confirm
+    [[ "$confirm" =~ ^[Nn]$ ]] && { warn "Paused. Re-run when ready."; exit 0; }
     echo ""
 }
 
