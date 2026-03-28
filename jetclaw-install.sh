@@ -68,19 +68,23 @@ SKIP_GITHUB=false
 DRY_RUN=false
 
 # ---------------------------------------------------------------------------
-# Colors / helpers — disabled when not a terminal
+# Colors / helpers — check the REAL terminal, not the tee pipe
 # ---------------------------------------------------------------------------
-if [[ -t 1 ]]; then
+if [[ -t 0 ]]; then
+    # stdin is a terminal = interactive session, enable colors
     RED='\033[0;31m'
     GREEN='\033[0;32m'
     YELLOW='\033[1;33m'
     BLUE='\033[0;34m'
     CYAN='\033[0;36m'
+    MAGENTA='\033[0;35m'
     BOLD='\033[1m'
     DIM='\033[2m'
+    BG_RED='\033[41m'
+    BG_YELLOW='\033[43m'
     NC='\033[0m'
 else
-    RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' DIM='' NC=''
+    RED='' GREEN='' YELLOW='' BLUE='' CYAN='' MAGENTA='' BOLD='' DIM='' BG_RED='' BG_YELLOW='' NC=''
 fi
 
 info()    { echo -e "${BLUE}[INFO]${NC} $*"; }
@@ -100,9 +104,9 @@ phase() {
 
 action_required() {
     echo ""
-    echo -e "  ${CYAN}${BOLD}>>> ACTION REQUIRED <<<${NC}"
+    echo -e "  ${BG_YELLOW}${BOLD} >>> ACTION REQUIRED <<< ${NC}"
     echo ""
-    echo -e "  $*"
+    echo -e "  ${YELLOW}$*${NC}"
     echo ""
 }
 
@@ -815,14 +819,19 @@ SSHEOF
 
     success "SSH hardened"
     echo ""
-    warn "  SSH has been restarted with password auth DISABLED."
+    echo -e "  ${BG_RED}${BOLD} !!! WARNING: Password auth is now DISABLED !!! ${NC}"
+    echo ""
+    echo -e "  ${YELLOW}If you cannot SSH in from another terminal, type NO below${NC}"
+    echo -e "  ${YELLOW}to restore password auth before you get locked out.${NC}"
+    echo ""
 
-    action_required "Open a NEW terminal and verify you can still SSH in:\n    ssh $ADMIN_USER@$HOSTNAME_NEW\n\n  Do NOT close this terminal until you've confirmed."
+    action_required "Open a ${BOLD}NEW${NC}${YELLOW} terminal and verify you can still SSH in:\n\n    ${BOLD}ssh $ADMIN_USER@$HOSTNAME_NEW${NC}\n\n  ${RED}Do NOT close this terminal until you've confirmed!${NC}"
 
     echo ""
-    echo -e "  ${BOLD}Type YES to confirm SSH works, or NO to roll back:${NC}"
+    echo -e "  ${BG_YELLOW}${BOLD} Type YES if SSH works, or NO to roll back: ${NC}"
+    echo ""
     while true; do
-        read -rp "  SSH works in another terminal? (YES/NO): " ssh_confirm
+        read -rp "  SSH confirmed? (YES/NO): " ssh_confirm
         case "$ssh_confirm" in
             YES)
                 success "SSH confirmed working"
