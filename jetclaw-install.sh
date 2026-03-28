@@ -380,7 +380,7 @@ config = {
         "internal": {
             "enabled": True,
             "entries": {
-                "bootstrap-extra-files": {"enabled": True},
+                "bootstrap-extra-files": {"enabled": True, "paths": ["meta-frameworks/*.md"]},
                 "session-memory": {"enabled": True},
                 "command-logger": {"enabled": True},
                 "qmd-recall": {"enabled": True},
@@ -1338,10 +1338,11 @@ if ! $DRY_RUN; then
 
     success "Config generated: $OPENCLAW_DIR/openclaw.json"
 
-    # Store API key safely
-    sudo -u "$SERVICE_USER" mkdir -p "$OPENCLAW_DIR/auth"
-    OC_API_KEY="$API_KEY" generate_auth_file | sudo -u "$SERVICE_USER" tee "$OPENCLAW_DIR/auth/anthropic-default.json" >/dev/null
-    sudo -u "$SERVICE_USER" chmod 600 "$OPENCLAW_DIR/auth/anthropic-default.json"
+    # Store API key in the correct OpenClaw location
+    # Docs: ~/.openclaw/agents/<agentId>/agent/auth-profiles.json
+    sudo -u "$SERVICE_USER" mkdir -p "$OPENCLAW_DIR/agents/main/agent"
+    OC_API_KEY="$API_KEY" generate_auth_file | sudo -u "$SERVICE_USER" tee "$OPENCLAW_DIR/agents/main/agent/auth-profiles.json" >/dev/null
+    sudo -u "$SERVICE_USER" chmod 600 "$OPENCLAW_DIR/agents/main/agent/auth-profiles.json"
 
     # Save gateway token to secrets file
     sudo -u "$SERVICE_USER" tee "$SECRETS_DIR/gateway-token" >/dev/null <<< "$GATEWAY_TOKEN"
@@ -1350,6 +1351,7 @@ if ! $DRY_RUN; then
     success "API key and gateway token stored securely"
     echo ""
     info "Gateway token saved to: $SECRETS_DIR/gateway-token"
+    info "API key saved to: $OPENCLAW_DIR/agents/main/agent/auth-profiles.json"
     info "Token: ${GATEWAY_TOKEN:0:12}... (see file for full token)"
     echo ""
 else
@@ -1390,7 +1392,11 @@ if $INSTALL_ALL || prompt_yn "Run 'openclaw onboard' now? (recommended for first
 
     pause_confirm "Ready to start onboarding?"
 
-    sudo -u "$SERVICE_USER" openclaw onboard || warn "Onboarding had issues. You can re-run: sudo -u $SERVICE_USER openclaw onboard"
+    if ! $DRY_RUN; then
+        sudo -u "$SERVICE_USER" openclaw onboard || warn "Onboarding had issues. You can re-run: sudo -u $SERVICE_USER openclaw onboard"
+    else
+        echo -e "${YELLOW}[DRY-RUN]${NC} sudo -u $SERVICE_USER openclaw onboard"
+    fi
 else
     info "Skipping onboarding. Run later: sudo -u $SERVICE_USER openclaw onboard"
 fi
