@@ -819,7 +819,28 @@ SSHEOF
 
     action_required "Open a NEW terminal and verify you can still SSH in:\n    ssh $ADMIN_USER@$HOSTNAME_NEW\n\n  Do NOT close this terminal until you've confirmed."
 
-    pause_confirm "Confirmed SSH works in another terminal?"
+    echo ""
+    echo -e "  ${BOLD}Type YES to confirm SSH works, or NO to roll back:${NC}"
+    while true; do
+        read -rp "  SSH works in another terminal? (YES/NO): " ssh_confirm
+        case "$ssh_confirm" in
+            YES)
+                success "SSH confirmed working"
+                break
+                ;;
+            NO)
+                warn "Rolling back SSH hardening..."
+                sudo rm -f /etc/ssh/sshd_config.d/hardening.conf
+                sudo systemctl restart sshd
+                success "Password auth re-enabled. SSH restored to previous state."
+                info "Fix your SSH key access, then re-run the script."
+                exit 0
+                ;;
+            *)
+                warn "Type YES or NO (full word, capitalized)"
+                ;;
+        esac
+    done
 
     # -- 1.4 Firewall -------------------------------------------------------
     info "Step 4/8: Configuring firewall (UFW)..."
