@@ -866,7 +866,7 @@ SSHEOF
     echo -e "  ${YELLOW}to restore password auth before you get locked out.${NC}"
     echo ""
 
-    action_required "Open a ${BOLD}NEW${NC}${YELLOW} terminal and verify you can still SSH in:\n\n    ${BOLD}ssh $ADMIN_USER@$HOSTNAME_NEW${NC}\n\n  ${RED}Do NOT close this terminal until you've confirmed!${NC}"
+    action_required "Open a ${BOLD}NEW${NC}${YELLOW} terminal and verify you can still SSH in:\n\n    ${BOLD}ssh $ADMIN_USER@$CURRENT_IP${NC}\n\n  ${RED}Do NOT close this terminal until you've confirmed!${NC}"
 
     echo ""
     echo -e "  ${BG_YELLOW}${BOLD} Type YES if SSH works, or NO to roll back: ${NC}"
