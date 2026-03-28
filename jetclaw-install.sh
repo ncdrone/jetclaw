@@ -1002,6 +1002,9 @@ else
 fi
 
 
+# Set CURRENT_IP for use throughout the script (may have been set in hardening)
+CURRENT_IP=${CURRENT_IP:-$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")}
+
 # =========================================================================
 # PHASE 1.5: TAILSCALE
 # =========================================================================
@@ -1417,40 +1420,63 @@ echo ""
 
 GATEWAY_TOKEN=""
 if ! $DRY_RUN; then
-    GATEWAY_TOKEN=$(openssl rand -hex 24)
-
-    # Build allowed origins list
-    ORIGINS='["https://localhost:'"$GATEWAY_PORT"'"'
-    if [[ -n "${TS_FQDN:-}" ]]; then
-        ORIGINS="$ORIGINS, \"https://$TS_FQDN\""
-    fi
-    ORIGINS="$ORIGINS]"
-
     sudo -u "$SERVICE_USER" mkdir -p "$OPENCLAW_DIR"
 
-    # Generate config using Python (no injection possible)
-    OC_PORT="$GATEWAY_PORT" \
-    OC_WORKSPACE="$WORKSPACE_DIR" \
-    OC_GATEWAY_TOKEN="$GATEWAY_TOKEN" \
-    OC_ALLOWED_ORIGINS="$ORIGINS" \
-    OC_TELEGRAM_TOKEN="${TELEGRAM_TOKEN:-}" \
-    OC_SKIP_TAILSCALE="$SKIP_TAILSCALE" \
-    OC_CHROMIUM_PATH="${CHROMIUM_PATH:-}" \
-    generate_openclaw_config | sudo -u "$SERVICE_USER" tee "$OPENCLAW_DIR/openclaw.json" >/dev/null
+    # Check if config already exists (re-run protection)
+    if [[ -f "$OPENCLAW_DIR/openclaw.json" ]]; then
+        warn "Config already exists: $OPENCLAW_DIR/openclaw.json"
+        if prompt_yn "Overwrite existing config? (NO keeps your current config)" "n"; then
+            sudo -u "$SERVICE_USER" cp "$OPENCLAW_DIR/openclaw.json" "$OPENCLAW_DIR/openclaw.json.backup-$(date +%s)"
+            info "Existing config backed up"
+        else
+            info "Keeping existing config"
+            # Read existing gateway token from secrets if available
+            if [[ -f "$SECRETS_DIR/gateway-token" ]]; then
+                GATEWAY_TOKEN=$(sudo cat "$SECRETS_DIR/gateway-token" 2>/dev/null || echo "")
+                info "Using existing gateway token"
+            fi
+            # Skip to after config generation
+            SKIP_CONFIG_GEN=true
+        fi
+    fi
 
-    success "Config generated: $OPENCLAW_DIR/openclaw.json"
+    SKIP_CONFIG_GEN=${SKIP_CONFIG_GEN:-false}
+    if ! $SKIP_CONFIG_GEN; then
+        GATEWAY_TOKEN=$(openssl rand -hex 24)
 
-    # Store API key in the correct OpenClaw location
-    # Docs: ~/.openclaw/agents/<agentId>/agent/auth-profiles.json
-    sudo -u "$SERVICE_USER" mkdir -p "$OPENCLAW_DIR/agents/main/agent"
-    OC_API_KEY="$API_KEY" generate_auth_file | sudo -u "$SERVICE_USER" tee "$OPENCLAW_DIR/agents/main/agent/auth-profiles.json" >/dev/null
-    sudo -u "$SERVICE_USER" chmod 600 "$OPENCLAW_DIR/agents/main/agent/auth-profiles.json"
+        # Build allowed origins list
+        ORIGINS='["https://localhost:'"$GATEWAY_PORT"'"'
+        if [[ -n "${TS_FQDN:-}" ]]; then
+            ORIGINS="$ORIGINS, \"https://$TS_FQDN\""
+        fi
+        ORIGINS="$ORIGINS]"
 
-    # Save gateway token to secrets file
-    sudo -u "$SERVICE_USER" tee "$SECRETS_DIR/gateway-token" >/dev/null <<< "$GATEWAY_TOKEN"
-    sudo -u "$SERVICE_USER" chmod 600 "$SECRETS_DIR/gateway-token"
+        # Generate config using Python (no injection possible)
+        OC_PORT="$GATEWAY_PORT" \
+        OC_WORKSPACE="$WORKSPACE_DIR" \
+        OC_GATEWAY_TOKEN="$GATEWAY_TOKEN" \
+        OC_ALLOWED_ORIGINS="$ORIGINS" \
+        OC_TELEGRAM_TOKEN="${TELEGRAM_TOKEN:-}" \
+        OC_SKIP_TAILSCALE="$SKIP_TAILSCALE" \
+        OC_CHROMIUM_PATH="${CHROMIUM_PATH:-}" \
+        generate_openclaw_config | sudo -u "$SERVICE_USER" tee "$OPENCLAW_DIR/openclaw.json" >/dev/null
 
-    success "API key and gateway token stored securely"
+        success "Config generated: $OPENCLAW_DIR/openclaw.json"
+    fi
+
+    if ! $SKIP_CONFIG_GEN; then
+        # Store API key in the correct OpenClaw location
+        # Docs: ~/.openclaw/agents/<agentId>/agent/auth-profiles.json
+        sudo -u "$SERVICE_USER" mkdir -p "$OPENCLAW_DIR/agents/main/agent"
+        OC_API_KEY="$API_KEY" generate_auth_file | sudo -u "$SERVICE_USER" tee "$OPENCLAW_DIR/agents/main/agent/auth-profiles.json" >/dev/null
+        sudo -u "$SERVICE_USER" chmod 600 "$OPENCLAW_DIR/agents/main/agent/auth-profiles.json"
+
+        # Save gateway token to secrets file
+        sudo -u "$SERVICE_USER" tee "$SECRETS_DIR/gateway-token" >/dev/null <<< "$GATEWAY_TOKEN"
+        sudo -u "$SERVICE_USER" chmod 600 "$SECRETS_DIR/gateway-token"
+
+        success "API key and gateway token stored securely"
+    fi
     echo ""
     info "Gateway token saved to: $SECRETS_DIR/gateway-token"
     info "API key saved to: $OPENCLAW_DIR/agents/main/agent/auth-profiles.json"
@@ -1576,9 +1602,9 @@ if $INSTALL_ALL || prompt_yn "Install meta-frameworks? (operational philosophy t
             sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$WORKSPACE_DIR/meta-frameworks"
             success "Meta-frameworks installed and customized"
             echo "  Files:"
-            ls "$WORKSPACE_DIR/meta-frameworks/"*.md 2>/dev/null | while read -r f; do
-                echo "    $(basename "$f")"
-            done
+            for f in "$WORKSPACE_DIR/meta-frameworks/"*.md; do
+                [[ -f "$f" ]] && echo "    $(basename "$f")"
+            done || true
         else
             warn "Templates not found at: $TEMPLATES_SRC"
             warn "Make sure you cloned the full jetclaw repo (not just the script)."
