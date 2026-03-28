@@ -572,8 +572,8 @@ if [[ $EUID -eq 0 ]]; then
     fatal "Do not run this script as root. Run as your admin user with sudo access."
 fi
 sudo -n true 2>/dev/null || {
-    warn "Testing sudo access (you may be prompted for your password)..."
-    sudo true || fatal "This user does not have sudo access."
+    info "Enter your password to confirm sudo access:"
+    sudo -v || fatal "Sudo access required. Check your password and try again."
 }
 success "Sudo access confirmed"
 
@@ -747,7 +747,10 @@ echo "  Install PostgreSQL: $( $SKIP_POSTGRES && echo 'SKIP' || echo 'YES' )"
 echo "  Install Chromium:   $( $SKIP_CHROMIUM && echo 'SKIP' || echo 'YES' )"
 echo ""
 
-pause_confirm "Everything look right? Begin installation?"
+if ! prompt_yn "Everything look right? Begin installation?" "y"; then
+    warn "Aborted. Re-run when ready."
+    exit 0
+fi
 
 
 # =========================================================================
