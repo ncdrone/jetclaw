@@ -587,7 +587,8 @@ echo -e "${BOLD}--- Basic Configuration ---${NC}"
 echo ""
 
 if [[ -z "$ADMIN_USER" ]]; then
-    ADMIN_USER="$(whoami)"
+    DETECTED_USER="$(whoami)"
+    prompt_value ADMIN_USER "Admin username on this machine" "$DETECTED_USER"
 fi
 info "Admin user: $ADMIN_USER"
 
