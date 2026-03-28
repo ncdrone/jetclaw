@@ -807,12 +807,24 @@ if ! $SKIP_HARDENING; then
     echo -e "  ${CYAN}# Step 2: Copy it to this Jetson${NC}"
     echo -e "  ${BOLD}ssh-copy-id -i ~/.ssh/id_ed25519_$HOSTNAME_NEW.pub $ADMIN_USER@$CURRENT_IP${NC}"
     echo ""
-    echo -e "  ${CYAN}# Step 3: Test it works (should connect WITHOUT a password)${NC}"
-    echo -e "  ${BOLD}ssh -i ~/.ssh/id_ed25519_$HOSTNAME_NEW $ADMIN_USER@$CURRENT_IP${NC}"
+    echo -e "  ${CYAN}# Step 3: Add SSH config entry on your Mac${NC}"
+    echo -e "  ${BOLD}cat >> ~/.ssh/config << 'EOF'"
+    echo ""
+    echo "Host $HOSTNAME_NEW"
+    echo "    HostName $CURRENT_IP"
+    echo "    User $ADMIN_USER"
+    echo "    IdentityFile ~/.ssh/id_ed25519_$HOSTNAME_NEW"
+    echo "    IdentitiesOnly yes"
+    echo "    ServerAliveInterval 30"
+    echo "    ServerAliveCountMax 3"
+    echo -e "EOF${NC}"
+    echo ""
+    echo -e "  ${CYAN}# Step 4: Test it works (should connect WITHOUT a password)${NC}"
+    echo -e "  ${BOLD}ssh $HOSTNAME_NEW${NC}"
     echo ""
     echo -e "  ${GREEN}--- END ---${NC}"
     echo ""
-    echo -e "  ${YELLOW}Only continue after Step 3 connects without asking for a password.${NC}"
+    echo -e "  ${YELLOW}Only continue after Step 4 connects without asking for a password.${NC}"
     echo ""
 
     echo -e "  ${BG_YELLOW}${BOLD} Type YES when SSH key works, or NO to skip SSH hardening: ${NC}"
@@ -979,8 +991,6 @@ DNSEOF
         warn "Could not verify DNS. Check manually: resolvectl status"
         warn "Config was written to /etc/systemd/resolved.conf -- may need a reboot."
     fi
-    success "Encrypted DNS configured (Quad9 over TLS + DNSSEC)"
-
     echo ""
     success "=== System hardening complete ==="
     pause_continue "Press Enter to continue to Tailscale setup..."
@@ -1015,17 +1025,22 @@ if ! $SKIP_TAILSCALE; then
         fi
     fi
 
-    info "Bringing Tailscale up..."
-    echo ""
-    if [[ -n "$TAILSCALE_AUTH" ]]; then
-        run_cmd sudo tailscale up --ssh --auth-key="$TAILSCALE_AUTH"
+    # Check if Tailscale is already connected
+    if tailscale status &>/dev/null; then
+        success "Tailscale already connected"
     else
-        echo "  This will open a Tailscale login URL."
+        info "Bringing Tailscale up..."
+        echo ""
+        if [[ -n "$TAILSCALE_AUTH" ]]; then
+            run_cmd sudo tailscale up --ssh --auth-key="$TAILSCALE_AUTH"
+        else
+            echo "  This will open a Tailscale login URL."
 
-        action_required "When the URL appears, open it in your browser and log in\n  to your Tailscale account to authorize this machine."
+            action_required "When the URL appears, open it in your browser and log in\n  to your Tailscale account to authorize this machine."
 
-        pause_confirm "Ready to run 'tailscale up'?"
-        run_cmd sudo tailscale up --ssh
+            pause_confirm "Ready to run 'tailscale up'?"
+            run_cmd sudo tailscale up --ssh
+        fi
     fi
 
     TS_IP="unknown"
@@ -1743,18 +1758,24 @@ if [[ -n "${TS_FQDN:-}" ]]; then
     echo "    Tailscale host:   $TS_FQDN"
 fi
 
+# Use the best available SSH target for instructions
+SSH_TARGET="$HOSTNAME_NEW"
+if [[ -z "${TS_FQDN:-}" ]]; then
+    SSH_TARGET="${CURRENT_IP:-$HOSTNAME_NEW}"
+fi
+
 echo ""
 echo -e "  ${BOLD}Next Steps:${NC}"
 echo ""
 STEP=1
 echo "  $STEP. ${BOLD}Read the gateway token:${NC}"
-echo "     ssh $HOSTNAME_NEW"
+echo "     ssh $SSH_TARGET"
 echo "     sudo cat $SECRETS_DIR/gateway-token"
 echo ""
 ((STEP++))
 echo "  $STEP. ${BOLD}Pair your browser${NC} (first time, via SSH tunnel):"
 echo "     On your Mac, open two terminals:"
-echo "       Terminal 1: ssh -N -L $GATEWAY_PORT:127.0.0.1:$GATEWAY_PORT $ADMIN_USER@$HOSTNAME_NEW"
+echo "       Terminal 1: ssh -N -L $GATEWAY_PORT:127.0.0.1:$GATEWAY_PORT $ADMIN_USER@$SSH_TARGET"
 echo "       Terminal 2: open \"http://localhost:$GATEWAY_PORT/?token=YOUR_TOKEN\""
 echo "     The tunnel is supposed to hang (that's the -N flag)."
 echo ""
