@@ -791,13 +791,54 @@ if ! $SKIP_HARDENING; then
     # -- 1.3 SSH hardening --------------------------------------------------
     info "Step 3/8: Hardening SSH configuration..."
     echo ""
-    echo "  This will disable password authentication and root login."
-    echo "  Make sure you have SSH key access to this machine BEFORE continuing."
+    echo -e "  ${BG_RED}${BOLD} !!! THIS STEP WILL DISABLE PASSWORD LOGIN !!! ${NC}"
+    echo ""
+    echo -e "  ${YELLOW}You MUST have SSH key access working BEFORE continuing.${NC}"
+    echo -e "  ${YELLOW}If you don't, you will be locked out of this machine.${NC}"
+    echo ""
+    echo -e "  ${BOLD}On your Mac, run these commands now:${NC}"
+    echo ""
+    echo -e "  ${GREEN}--- COPY AND PASTE INTO YOUR MAC TERMINAL ---${NC}"
+    echo ""
+    CURRENT_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "<this-machine-ip>")
+    echo -e "  ${CYAN}# Step 1: Generate an SSH key (skip if you already have one)${NC}"
+    echo -e "  ${BOLD}ssh-keygen -t ed25519 -C \"$HOSTNAME_NEW\" -f ~/.ssh/id_ed25519_$HOSTNAME_NEW${NC}"
+    echo ""
+    echo -e "  ${CYAN}# Step 2: Copy it to this Jetson${NC}"
+    echo -e "  ${BOLD}ssh-copy-id -i ~/.ssh/id_ed25519_$HOSTNAME_NEW.pub $ADMIN_USER@$CURRENT_IP${NC}"
+    echo ""
+    echo -e "  ${CYAN}# Step 3: Test it works (should connect WITHOUT a password)${NC}"
+    echo -e "  ${BOLD}ssh -i ~/.ssh/id_ed25519_$HOSTNAME_NEW $ADMIN_USER@$CURRENT_IP${NC}"
+    echo ""
+    echo -e "  ${GREEN}--- END ---${NC}"
+    echo ""
+    echo -e "  ${YELLOW}Only continue after Step 3 connects without asking for a password.${NC}"
     echo ""
 
-    action_required "Ensure your SSH public key is on this machine.\n  On your Mac, run:\n    ssh-copy-id -i ~/.ssh/YOUR_KEY.pub $ADMIN_USER@$(hostname)"
+    echo -e "  ${BG_YELLOW}${BOLD} Type YES when SSH key works, or NO to skip SSH hardening: ${NC}"
+    echo ""
+    while true; do
+        read -rp "  SSH key works without password? (YES/NO): " ssh_key_confirm
+        case "$ssh_key_confirm" in
+            YES)
+                success "SSH key access confirmed"
+                break
+                ;;
+            NO)
+                warn "Skipping SSH hardening. Password auth will remain enabled."
+                warn "You can re-run the script later to harden SSH."
+                # Jump past the SSH hardening block
+                SSH_HARDENING_SKIPPED=true
+                break
+                ;;
+            *)
+                warn "Type YES or NO (full word, capitalized)"
+                ;;
+        esac
+    done
 
-    pause_confirm "SSH key is set up and you can connect with it?"
+    SSH_HARDENING_SKIPPED=${SSH_HARDENING_SKIPPED:-false}
+    if ! $SSH_HARDENING_SKIPPED; then
 
     run_cmd sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
 
@@ -850,6 +891,8 @@ SSHEOF
                 ;;
         esac
     done
+
+    fi  # end SSH_HARDENING_SKIPPED check
 
     # -- 1.4 Firewall -------------------------------------------------------
     info "Step 4/8: Configuring firewall (UFW)..."
