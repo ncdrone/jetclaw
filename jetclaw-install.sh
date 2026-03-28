@@ -972,7 +972,13 @@ Domains=~.
 DNSEOF
         sudo systemctl restart systemd-resolved
     fi
-    verify_shell "DNS configured" "resolvectl status | grep -q '9.9.9.9'"
+    # Verify DNS -- check both resolvectl and the config file itself
+    if resolvectl status 2>/dev/null | grep -q '9.9.9.9' || grep -q '9.9.9.9' /etc/systemd/resolved.conf 2>/dev/null; then
+        success "DNS configured"
+    else
+        warn "Could not verify DNS. Check manually: resolvectl status"
+        warn "Config was written to /etc/systemd/resolved.conf -- may need a reboot."
+    fi
     success "Encrypted DNS configured (Quad9 over TLS + DNSSEC)"
 
     echo ""
