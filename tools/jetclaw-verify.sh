@@ -26,10 +26,10 @@ declare -a DASHBOARD_NAMES=()
 declare -a DASHBOARD_STATUS=()
 declare -a DASHBOARD_DETAIL=()
 
-pass() { echo -e "  ${GREEN}PASS${NC}  $*"; ((PASS++)); ((SEC_PASS++)); }
-fail() { echo -e "  ${RED}FAIL${NC}  $*"; ((FAIL++)); ((SEC_FAIL++)); }
-warn() { echo -e "  ${YELLOW}WARN${NC}  $*"; ((WARN++)); ((SEC_WARN++)); }
-skip() { echo -e "  ${CYAN}SKIP${NC}  $*"; ((SKIP++)); ((SEC_SKIP++)); }
+pass() { echo -e "  ${GREEN}PASS${NC}  $*"; PASS=$((PASS+1)); SEC_PASS=$((SEC_PASS+1)); }
+fail() { echo -e "  ${RED}FAIL${NC}  $*"; FAIL=$((FAIL+1)); SEC_FAIL=$((SEC_FAIL+1)); }
+warn() { echo -e "  ${YELLOW}WARN${NC}  $*"; WARN=$((WARN+1)); SEC_WARN=$((SEC_WARN+1)); }
+skip() { echo -e "  ${CYAN}SKIP${NC}  $*"; SKIP=$((SKIP+1)); SEC_SKIP=$((SEC_SKIP+1)); }
 
 # Start a new section — resets per-section counters
 begin_section() {
@@ -497,7 +497,8 @@ begin_section "=== NETWORK ==="
 # =========================================================================
 
 echo -e "  ${BLUE}Listening ports:${NC}"
-sudo ss -tlnp 2>/dev/null | grep LISTEN | while read -r line; do
+while read -r line; do
+    [[ -z "$line" ]] && continue
     port=$(echo "$line" | awk '{print $4}' | rev | cut -d: -f1 | rev)
     proc=$(echo "$line" | grep -o 'users:(("[^"]*"' | cut -d'"' -f2)
     addr=$(echo "$line" | awk '{print $4}' | rev | cut -d: -f2- | rev)
@@ -508,7 +509,7 @@ sudo ss -tlnp 2>/dev/null | grep LISTEN | while read -r line; do
     else
         pass "Port $port ($proc) — $addr"
     fi
-done
+done < <(sudo ss -tlnp 2>/dev/null | grep LISTEN)
 
 end_section "Network"
 
