@@ -2,9 +2,8 @@
 #
 # jetclaw-verify.sh — Comprehensive verification of hardening + OpenClaw installation
 #
-# Run ON the target machine. Shows pass/fail for every install step from the
-# metis-complete-guide-v2.md checklist. Covers: system hardening, Tailscale,
-# service user, dependencies, apps, OpenClaw gateway, Arsenal services, and network.
+# Run ON the target machine. Shows pass/fail for every install step and
+# a per-section dashboard (COMPLETE / PARTIAL / MISSING / NOT INSTALLED).
 #
 set -uo pipefail
 
@@ -16,54 +15,89 @@ else
     RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
 fi
 
-PASS=0
-FAIL=0
-WARN=0
-SKIP=0
+# Global counters
+PASS=0; FAIL=0; WARN=0; SKIP=0
 
-pass() { echo -e "  ${GREEN}PASS${NC}  $*"; ((PASS++)); }
-fail() { echo -e "  ${RED}FAIL${NC}  $*"; ((FAIL++)); }
-warn() { echo -e "  ${YELLOW}WARN${NC}  $*"; ((WARN++)); }
-skip() { echo -e "  ${CYAN}SKIP${NC}  $*"; ((SKIP++)); }
-section() { echo -e "\n${BOLD}$*${NC}\n"; }
+# Per-section counters
+SEC_PASS=0; SEC_FAIL=0; SEC_WARN=0; SEC_SKIP=0
 
-# Helper: check file permissions (Linux stat format)
+# Section dashboard (built up as we go)
+declare -a DASHBOARD_NAMES=()
+declare -a DASHBOARD_STATUS=()
+declare -a DASHBOARD_DETAIL=()
+
+pass() { echo -e "  ${GREEN}PASS${NC}  $*"; ((PASS++)); ((SEC_PASS++)); }
+fail() { echo -e "  ${RED}FAIL${NC}  $*"; ((FAIL++)); ((SEC_FAIL++)); }
+warn() { echo -e "  ${YELLOW}WARN${NC}  $*"; ((WARN++)); ((SEC_WARN++)); }
+skip() { echo -e "  ${CYAN}SKIP${NC}  $*"; ((SKIP++)); ((SEC_SKIP++)); }
+
+# Start a new section — resets per-section counters
+begin_section() {
+    SEC_PASS=0; SEC_FAIL=0; SEC_WARN=0; SEC_SKIP=0
+    echo -e "\n${BOLD}$*${NC}\n"
+}
+
+# End a section — compute status and add to dashboard
+end_section() {
+    local name="$1"
+    local total=$((SEC_PASS + SEC_FAIL + SEC_WARN + SEC_SKIP))
+    local status detail
+
+    if [[ $total -eq 0 ]]; then
+        status="${CYAN}NOT CHECKED${NC}"
+        detail="no checks ran"
+    elif [[ $SEC_FAIL -eq 0 && $SEC_WARN -eq 0 && $SEC_SKIP -eq 0 ]]; then
+        status="${GREEN}COMPLETE${NC}"
+        detail="${SEC_PASS}/${total} passed"
+    elif [[ $SEC_PASS -eq 0 && $SEC_FAIL -eq 0 && $SEC_WARN -eq 0 ]]; then
+        status="${CYAN}NOT INSTALLED${NC}"
+        detail="all skipped"
+    elif [[ $SEC_PASS -eq 0 && $SEC_SKIP -eq $total ]]; then
+        status="${CYAN}NOT INSTALLED${NC}"
+        detail="optional, not present"
+    elif [[ $SEC_PASS -eq 0 ]]; then
+        status="${RED}MISSING${NC}"
+        detail="${SEC_FAIL} failed, ${SEC_WARN} warnings"
+    else
+        status="${YELLOW}PARTIAL${NC}"
+        local parts=()
+        [[ $SEC_PASS -gt 0 ]] && parts+=("${SEC_PASS} ok")
+        [[ $SEC_FAIL -gt 0 ]] && parts+=("${SEC_FAIL} failed")
+        [[ $SEC_WARN -gt 0 ]] && parts+=("${SEC_WARN} warn")
+        [[ $SEC_SKIP -gt 0 ]] && parts+=("${SEC_SKIP} skip")
+        detail=$(IFS=', '; echo "${parts[*]}")
+    fi
+
+    DASHBOARD_NAMES+=("$name")
+    DASHBOARD_STATUS+=("$status")
+    DASHBOARD_DETAIL+=("$detail")
+}
+
+# Helpers
 check_perms() {
     local path="$1" expected="$2" label="${3:-$1}"
-    if [[ ! -e "$path" ]]; then
-        fail "$label: does not exist"
-        return 1
-    fi
+    if [[ ! -e "$path" ]]; then fail "$label: does not exist"; return 1; fi
     local perms
     perms=$(stat -c '%a' "$path" 2>/dev/null || stat -f '%Lp' "$path" 2>/dev/null)
-    if [[ "$perms" == "$expected" ]]; then
-        pass "$label permissions: $perms"
-    else
-        fail "$label permissions: $perms (expected $expected)"
-    fi
+    if [[ "$perms" == "$expected" ]]; then pass "$label permissions: $perms"
+    else fail "$label permissions: $perms (expected $expected)"; fi
 }
 
-# Helper: check file ownership
 check_owner() {
     local path="$1" expected="$2" label="${3:-$1}"
-    if [[ ! -e "$path" ]]; then
-        fail "$label: does not exist"
-        return 1
-    fi
+    if [[ ! -e "$path" ]]; then fail "$label: does not exist"; return 1; fi
     local owner
     owner=$(stat -c '%U' "$path" 2>/dev/null || stat -f '%Su' "$path" 2>/dev/null)
-    if [[ "$owner" == "$expected" ]]; then
-        pass "$label owned by: $expected"
-    else
-        fail "$label owned by: $owner (expected $expected)"
-    fi
+    if [[ "$owner" == "$expected" ]]; then pass "$label owned by: $expected"
+    else fail "$label owned by: $owner (expected $expected)"; fi
 }
 
+
 # =========================================================================
-section "=== SYSTEM HARDENING (Guide Part 1) ==="
+begin_section "=== SYSTEM HARDENING ==="
 # =========================================================================
 
-# --- 1.2 Hostname ---
+# Hostname
 HOSTNAME=$(hostnamectl --static 2>/dev/null || hostname)
 if [[ "$HOSTNAME" != "localhost" && "$HOSTNAME" != "orin" && "$HOSTNAME" != "ubuntu" && -n "$HOSTNAME" ]]; then
     pass "Hostname set: $HOSTNAME"
@@ -71,7 +105,7 @@ else
     warn "Hostname may be default: $HOSTNAME"
 fi
 
-# --- 1.3 Base packages ---
+# Base packages
 for pkg in curl git vim htop tmux ufw fail2ban; do
     if command -v "$pkg" &>/dev/null || dpkg -s "$pkg" &>/dev/null 2>&1; then
         pass "Package installed: $pkg"
@@ -80,8 +114,7 @@ for pkg in curl git vim htop tmux ufw fail2ban; do
     fi
 done
 
-# --- 1.6 SSH hardening ---
-# Check both hardening.conf drop-in and main sshd_config
+# SSH hardening
 SSH_CONF=""
 if [[ -f /etc/ssh/sshd_config.d/hardening.conf ]]; then
     SSH_CONF="/etc/ssh/sshd_config.d/hardening.conf"
@@ -94,56 +127,14 @@ else
 fi
 
 if [[ -n "$SSH_CONF" ]]; then
-    # PasswordAuthentication no
-    if grep -qE "^PasswordAuthentication\s+no" "$SSH_CONF" 2>/dev/null; then
-        pass "SSH: PasswordAuthentication no"
-    else
-        fail "SSH: PasswordAuthentication not disabled"
-    fi
+    grep -qE "^PasswordAuthentication\s+no" "$SSH_CONF" 2>/dev/null && pass "SSH: PasswordAuthentication no" || fail "SSH: PasswordAuthentication not disabled"
+    grep -qE "^PermitRootLogin\s+no" "$SSH_CONF" 2>/dev/null && pass "SSH: PermitRootLogin no" || fail "SSH: PermitRootLogin not disabled"
+    grep -qE "^PubkeyAuthentication\s+yes" "$SSH_CONF" 2>/dev/null && pass "SSH: PubkeyAuthentication yes" || fail "SSH: PubkeyAuthentication not enabled"
+    grep -qE "^PermitEmptyPasswords\s+no" "$SSH_CONF" 2>/dev/null && pass "SSH: PermitEmptyPasswords no" || warn "SSH: PermitEmptyPasswords not explicitly no"
+    grep -qE "^X11Forwarding\s+no" "$SSH_CONF" 2>/dev/null && pass "SSH: X11Forwarding no" || warn "SSH: X11Forwarding not disabled"
+    grep -qE "^MaxAuthTries\s+[1-3]$" "$SSH_CONF" 2>/dev/null && pass "SSH: MaxAuthTries <= 3" || warn "SSH: MaxAuthTries not set to 3 or lower"
+    grep -qE "^ClientAliveInterval\s+[0-9]+" "$SSH_CONF" 2>/dev/null && pass "SSH: ClientAliveInterval configured" || warn "SSH: ClientAliveInterval not set"
 
-    # PermitRootLogin no
-    if grep -qE "^PermitRootLogin\s+no" "$SSH_CONF" 2>/dev/null; then
-        pass "SSH: PermitRootLogin no"
-    else
-        fail "SSH: PermitRootLogin not disabled"
-    fi
-
-    # PubkeyAuthentication yes
-    if grep -qE "^PubkeyAuthentication\s+yes" "$SSH_CONF" 2>/dev/null; then
-        pass "SSH: PubkeyAuthentication yes"
-    else
-        fail "SSH: PubkeyAuthentication not enabled"
-    fi
-
-    # PermitEmptyPasswords no
-    if grep -qE "^PermitEmptyPasswords\s+no" "$SSH_CONF" 2>/dev/null; then
-        pass "SSH: PermitEmptyPasswords no"
-    else
-        warn "SSH: PermitEmptyPasswords not explicitly set to no"
-    fi
-
-    # X11Forwarding no
-    if grep -qE "^X11Forwarding\s+no" "$SSH_CONF" 2>/dev/null; then
-        pass "SSH: X11Forwarding no"
-    else
-        warn "SSH: X11Forwarding not explicitly disabled"
-    fi
-
-    # MaxAuthTries 3
-    if grep -qE "^MaxAuthTries\s+[1-3]$" "$SSH_CONF" 2>/dev/null; then
-        pass "SSH: MaxAuthTries <= 3"
-    else
-        warn "SSH: MaxAuthTries not set to 3 or lower"
-    fi
-
-    # ClientAliveInterval
-    if grep -qE "^ClientAliveInterval\s+[0-9]+" "$SSH_CONF" 2>/dev/null; then
-        pass "SSH: ClientAliveInterval configured"
-    else
-        warn "SSH: ClientAliveInterval not set"
-    fi
-
-    # AllowUsers (optional but recommended)
     if grep -qE "^AllowUsers" "$SSH_CONF" 2>/dev/null; then
         ALLOWED=$(grep "^AllowUsers" "$SSH_CONF" | awk '{$1=""; print $0}' | xargs)
         pass "SSH: AllowUsers restricted to: $ALLOWED"
@@ -152,39 +143,14 @@ if [[ -n "$SSH_CONF" ]]; then
     fi
 fi
 
-# --- 1.7 UFW Firewall ---
+# UFW
 if command -v ufw &>/dev/null; then
     if sudo ufw status 2>/dev/null | grep -q "Status: active"; then
         pass "UFW firewall active"
-
-        if sudo ufw status 2>/dev/null | grep -q "deny (incoming)"; then
-            pass "UFW: default incoming deny"
-        else
-            fail "UFW: default incoming not set to deny"
-        fi
-
-        if sudo ufw status 2>/dev/null | grep -q "allow (outgoing)"; then
-            pass "UFW: default outgoing allow"
-        else
-            warn "UFW: default outgoing not set to allow"
-        fi
-
-        if sudo ufw status 2>/dev/null | grep -q "127.0.0.1"; then
-            pass "UFW: localhost allowed"
-        else
-            warn "UFW: no explicit localhost rule"
-        fi
-
-        # Check for Tailscale-only SSH (should NOT have LAN rules)
-        if sudo ufw status 2>/dev/null | grep -q "100.64.0.0/10"; then
-            pass "UFW: Tailscale SSH rule present (100.64.0.0/10)"
-        else
-            warn "UFW: no Tailscale SSH rule"
-        fi
-
-        if sudo ufw status 2>/dev/null | grep -qE "192\.168\.|10\.0\.0\." | grep -q "22"; then
-            warn "UFW: LAN SSH rules still present (should be Tailscale-only)"
-        fi
+        sudo ufw status 2>/dev/null | grep -q "deny (incoming)" && pass "UFW: default incoming deny" || fail "UFW: default incoming not deny"
+        sudo ufw status 2>/dev/null | grep -q "allow (outgoing)" && pass "UFW: default outgoing allow" || warn "UFW: default outgoing not allow"
+        sudo ufw status 2>/dev/null | grep -q "127.0.0.1" && pass "UFW: localhost allowed" || warn "UFW: no explicit localhost rule"
+        sudo ufw status 2>/dev/null | grep -q "100.64.0.0/10" && pass "UFW: Tailscale SSH rule present" || warn "UFW: no Tailscale SSH rule"
     else
         fail "UFW not active"
     fi
@@ -192,70 +158,41 @@ else
     fail "UFW not installed"
 fi
 
-# --- 1.9 Fail2ban ---
+# Fail2ban
 if systemctl is-active --quiet fail2ban 2>/dev/null; then
     pass "Fail2ban running"
     if [[ -f /etc/fail2ban/jail.local ]]; then
         pass "Fail2ban jail.local configured"
-        if grep -qE "bantime\s*=\s*24h" /etc/fail2ban/jail.local 2>/dev/null; then
-            pass "Fail2ban: SSH bantime 24h"
-        else
-            warn "Fail2ban: SSH bantime not set to 24h"
-        fi
+        grep -qE "bantime\s*=\s*24h" /etc/fail2ban/jail.local 2>/dev/null && pass "Fail2ban: SSH bantime 24h" || warn "Fail2ban: SSH bantime not 24h"
     else
-        warn "Fail2ban: no custom jail.local (using defaults)"
+        warn "Fail2ban: no custom jail.local"
     fi
 else
     fail "Fail2ban not running"
 fi
 
-# --- 1.10 Automatic updates ---
-if systemctl is-active --quiet unattended-upgrades 2>/dev/null; then
-    pass "Unattended upgrades active"
-else
-    warn "Unattended upgrades not active"
-fi
+# Auto updates
+systemctl is-active --quiet unattended-upgrades 2>/dev/null && pass "Unattended upgrades active" || warn "Unattended upgrades not active"
 
-# --- 1.11 Unnecessary services disabled ---
+# Unnecessary services
 for svc in avahi-daemon cups bluetooth ModemManager rpcbind; do
-    if systemctl is-active --quiet "$svc" 2>/dev/null; then
-        warn "Unnecessary service still running: $svc"
-    else
-        pass "Service disabled: $svc"
-    fi
+    systemctl is-active --quiet "$svc" 2>/dev/null && warn "Unnecessary service running: $svc" || pass "Service disabled: $svc"
 done
 
-# --- 1.12 DNS hardening ---
+# DNS
 if [[ -f /etc/systemd/resolved.conf ]]; then
-    if grep -q "9.9.9.9" /etc/systemd/resolved.conf 2>/dev/null; then
-        pass "DNS: Quad9 configured"
-    else
-        fail "DNS: Quad9 not configured"
-    fi
-
-    if grep -qE "^DNSOverTLS=yes" /etc/systemd/resolved.conf 2>/dev/null; then
-        pass "DNS: DNS-over-TLS enabled"
-    else
-        fail "DNS: DNS-over-TLS not enabled"
-    fi
-
-    if grep -qE "^DNSSEC=yes" /etc/systemd/resolved.conf 2>/dev/null; then
-        pass "DNS: DNSSEC enabled"
-    else
-        warn "DNS: DNSSEC not enabled"
-    fi
-
-    if grep -qE "^FallbackDNS=$" /etc/systemd/resolved.conf 2>/dev/null; then
-        pass "DNS: fallback DNS disabled (no plaintext fallback)"
-    else
-        warn "DNS: fallback DNS not explicitly disabled"
-    fi
+    grep -q "9.9.9.9" /etc/systemd/resolved.conf 2>/dev/null && pass "DNS: Quad9 configured" || fail "DNS: Quad9 not configured"
+    grep -qE "^DNSOverTLS=yes" /etc/systemd/resolved.conf 2>/dev/null && pass "DNS: DNS-over-TLS enabled" || fail "DNS: DNS-over-TLS not enabled"
+    grep -qE "^FallbackDNS=.+" /etc/systemd/resolved.conf 2>/dev/null && pass "DNS: fallback servers configured" || warn "DNS: no fallback servers (may lose DNS if Quad9 unreachable)"
 else
     fail "DNS: /etc/systemd/resolved.conf not found"
 fi
 
+end_section "System Hardening"
+
+
 # =========================================================================
-section "=== TAILSCALE (Guide Part 1.8) ==="
+begin_section "=== TAILSCALE ==="
 # =========================================================================
 
 if command -v tailscale &>/dev/null; then
@@ -264,45 +201,28 @@ if command -v tailscale &>/dev/null; then
     if tailscale status &>/dev/null; then
         TS_IP=$(tailscale ip -4 2>/dev/null || echo "unknown")
         pass "Tailscale connected (IP: $TS_IP)"
-
-        # Check Tailscale SSH
-        if tailscale status --json 2>/dev/null | grep -q '"SSH": true' 2>/dev/null; then
-            pass "Tailscale SSH enabled"
-        else
-            warn "Tailscale SSH may not be enabled"
-        fi
+        tailscale status --json 2>/dev/null | grep -q '"SSH": true' 2>/dev/null && pass "Tailscale SSH enabled" || warn "Tailscale SSH may not be enabled"
     else
         warn "Tailscale installed but not connected"
     fi
 
-    # Check Tailscale Serve
-    if tailscale serve status 2>/dev/null | grep -q "proxy" 2>/dev/null; then
-        pass "Tailscale Serve active"
-    else
-        warn "Tailscale Serve not configured"
-    fi
+    tailscale serve status 2>/dev/null | grep -q "proxy" 2>/dev/null && pass "Tailscale Serve active" || warn "Tailscale Serve not configured"
 
-    # Check operator
     TS_OPERATOR=$(tailscale debug prefs 2>/dev/null | grep -o '"OperatorUser":"[^"]*"' | cut -d'"' -f4)
-    if [[ -n "$TS_OPERATOR" ]]; then
-        pass "Tailscale operator set: $TS_OPERATOR"
-    else
-        warn "Tailscale operator not set (service user can't manage Serve)"
-    fi
+    [[ -n "$TS_OPERATOR" ]] && pass "Tailscale operator set: $TS_OPERATOR" || warn "Tailscale operator not set"
 else
-    warn "Tailscale not installed"
+    skip "Tailscale not installed"
 fi
 
+end_section "Tailscale"
+
+
 # =========================================================================
-section "=== SERVICE USER (Guide Parts 1.4, 5, 6, 7) ==="
+begin_section "=== SERVICE USER ==="
 # =========================================================================
 
-# Auto-detect service users
 DETECTED_USERS=$(systemctl list-unit-files 'openclaw-*.service' --no-legend 2>/dev/null | awk '{print $1}' | sed 's/openclaw-//;s/\.service//')
-
-if [[ -z "$DETECTED_USERS" ]]; then
-    DETECTED_USERS=$(find /var/lib -maxdepth 2 -name ".openclaw" -type d 2>/dev/null | sed 's|/var/lib/||;s|/.openclaw||')
-fi
+[[ -z "$DETECTED_USERS" ]] && DETECTED_USERS=$(find /var/lib -maxdepth 2 -name ".openclaw" -type d 2>/dev/null | sed 's|/var/lib/||;s|/.openclaw||')
 
 if [[ -z "$DETECTED_USERS" ]]; then
     warn "No OpenClaw service users detected"
@@ -311,37 +231,17 @@ else
         echo -e "  ${BLUE}--- Checking user: $SVC_USER ---${NC}"
         HOME_DIR="/var/lib/$SVC_USER"
 
-        # User exists
-        if ! id "$SVC_USER" &>/dev/null; then
-            fail "User missing: $SVC_USER"
-            continue
-        fi
+        if ! id "$SVC_USER" &>/dev/null; then fail "User missing: $SVC_USER"; continue; fi
         pass "User exists: $SVC_USER"
 
-        # System user (UID < 1000)
         USER_UID=$(id -u "$SVC_USER" 2>/dev/null)
-        if [[ "$USER_UID" -lt 1000 ]]; then
-            pass "System user (UID: $USER_UID)"
-        else
-            warn "Not a system user (UID: $USER_UID, expected < 1000)"
-        fi
+        [[ "$USER_UID" -lt 1000 ]] && pass "System user (UID: $USER_UID)" || warn "Not a system user (UID: $USER_UID)"
 
-        # Shell = /bin/bash
         USER_SHELL=$(getent passwd "$SVC_USER" | cut -d: -f7)
-        if [[ "$USER_SHELL" == "/bin/bash" ]]; then
-            pass "Shell: /bin/bash"
-        else
-            fail "Shell: $USER_SHELL (should be /bin/bash)"
-        fi
+        [[ "$USER_SHELL" == "/bin/bash" ]] && pass "Shell: /bin/bash" || fail "Shell: $USER_SHELL (should be /bin/bash)"
 
-        # Password locked
-        if sudo passwd -S "$SVC_USER" 2>/dev/null | grep -q "L"; then
-            pass "Password locked"
-        else
-            warn "Password may not be locked"
-        fi
+        sudo passwd -S "$SVC_USER" 2>/dev/null | grep -q "L" && pass "Password locked" || warn "Password may not be locked"
 
-        # Home directory
         if [[ -d "$HOME_DIR" ]]; then
             pass "Home directory exists: $HOME_DIR"
             check_perms "$HOME_DIR" "700" "Home dir"
@@ -350,106 +250,47 @@ else
             fail "Home directory missing: $HOME_DIR"
         fi
 
-        # Required subdirectories
         for subdir in .openclaw .secrets workspace logs; do
-            local_path="$HOME_DIR/$subdir"
-            if [[ -d "$local_path" ]]; then
+            if [[ -d "$HOME_DIR/$subdir" ]]; then
                 pass "Directory exists: ~/$subdir"
+            elif [[ "$subdir" == ".openclaw" || "$subdir" == ".secrets" ]]; then
+                fail "Directory missing: ~/$subdir"
             else
-                if [[ "$subdir" == ".openclaw" || "$subdir" == ".secrets" ]]; then
-                    fail "Directory missing: ~/$subdir"
-                else
-                    warn "Directory missing: ~/$subdir"
-                fi
+                warn "Directory missing: ~/$subdir"
             fi
         done
 
-        # .openclaw dir permissions
-        if [[ -d "$HOME_DIR/.openclaw" ]]; then
-            check_perms "$HOME_DIR/.openclaw" "700" "~/.openclaw"
-            check_owner "$HOME_DIR/.openclaw" "$SVC_USER" "~/.openclaw"
-        fi
+        [[ -d "$HOME_DIR/.openclaw" ]] && { check_perms "$HOME_DIR/.openclaw" "700" "~/.openclaw"; check_owner "$HOME_DIR/.openclaw" "$SVC_USER" "~/.openclaw"; }
+        [[ -d "$HOME_DIR/.secrets" ]] && { check_perms "$HOME_DIR/.secrets" "700" "~/.secrets"; check_owner "$HOME_DIR/.secrets" "$SVC_USER" "~/.secrets"; }
 
-        # .secrets dir permissions
-        if [[ -d "$HOME_DIR/.secrets" ]]; then
-            check_perms "$HOME_DIR/.secrets" "700" "~/.secrets"
-            check_owner "$HOME_DIR/.secrets" "$SVC_USER" "~/.secrets"
-        fi
-
-        # --- Sudoers (Part 5) ---
+        # Sudoers
         if [[ -f "/etc/sudoers.d/$SVC_USER" ]]; then
-            pass "Sudoers file exists: /etc/sudoers.d/$SVC_USER"
-
-            if sudo visudo -c -f "/etc/sudoers.d/$SVC_USER" &>/dev/null; then
-                pass "Sudoers syntax valid"
-            else
-                fail "Sudoers syntax invalid"
-            fi
-
-            # Check for key entries
+            pass "Sudoers file exists"
+            sudo visudo -c -f "/etc/sudoers.d/$SVC_USER" &>/dev/null && pass "Sudoers syntax valid" || fail "Sudoers syntax invalid"
             for entry in "arsenal-*" "nginx" "journalctl" "tailscale serve"; do
-                if grep -q "$entry" "/etc/sudoers.d/$SVC_USER" 2>/dev/null; then
-                    pass "Sudoers entry: $entry"
-                else
-                    warn "Sudoers missing entry for: $entry"
-                fi
+                grep -q "$entry" "/etc/sudoers.d/$SVC_USER" 2>/dev/null && pass "Sudoers entry: $entry" || warn "Sudoers missing: $entry"
             done
         else
             warn "No sudoers file for $SVC_USER"
         fi
 
-        # sudo -u works
-        if sudo -u "$SVC_USER" whoami &>/dev/null; then
-            pass "sudo -u $SVC_USER works (no freeze)"
-        else
-            fail "sudo -u $SVC_USER fails"
-        fi
+        sudo -u "$SVC_USER" whoami &>/dev/null && pass "sudo -u $SVC_USER works" || fail "sudo -u $SVC_USER fails"
 
-        # --- Git identity (Part 6.4) ---
+        # Git identity
         GIT_NAME=$(sudo -u "$SVC_USER" git config --global user.name 2>/dev/null)
-        if [[ -n "$GIT_NAME" ]]; then
-            pass "Git user.name: $GIT_NAME"
-        else
-            warn "Git user.name not configured for $SVC_USER"
-        fi
-
+        [[ -n "$GIT_NAME" ]] && pass "Git user.name: $GIT_NAME" || warn "Git user.name not configured"
         GIT_EMAIL=$(sudo -u "$SVC_USER" git config --global user.email 2>/dev/null)
-        if [[ -n "$GIT_EMAIL" ]]; then
-            pass "Git user.email: $GIT_EMAIL"
-        else
-            warn "Git user.email not configured for $SVC_USER"
-        fi
+        [[ -n "$GIT_EMAIL" ]] && pass "Git user.email: $GIT_EMAIL" || warn "Git user.email not configured"
 
-        # --- GitHub token (Part 6.5) ---
-        if [[ -f "$HOME_DIR/.secrets/github" ]]; then
-            pass "GitHub token exists: ~/.secrets/github"
-            check_perms "$HOME_DIR/.secrets/github" "600" "GitHub token"
-            check_owner "$HOME_DIR/.secrets/github" "$SVC_USER" "GitHub token"
-        else
-            warn "GitHub token not found: ~/.secrets/github"
-        fi
+        # Secrets
+        [[ -f "$HOME_DIR/.secrets/github" ]] && { pass "GitHub token exists"; check_perms "$HOME_DIR/.secrets/github" "600" "GitHub token"; } || warn "GitHub token not found"
+        [[ -f "$HOME_DIR/.secrets/postgres" ]] && { pass "PostgreSQL creds exist"; check_perms "$HOME_DIR/.secrets/postgres" "600" "PostgreSQL creds"; } || warn "PostgreSQL creds not found"
+        [[ -f "$HOME_DIR/.secrets/gateway-token" ]] && { pass "Gateway token exists"; check_perms "$HOME_DIR/.secrets/gateway-token" "600" "Gateway token"; } || warn "Gateway token not found"
 
-        # --- PostgreSQL credentials (Part 7.2) ---
-        if [[ -f "$HOME_DIR/.secrets/postgres" ]]; then
-            pass "PostgreSQL creds exist: ~/.secrets/postgres"
-            check_perms "$HOME_DIR/.secrets/postgres" "600" "PostgreSQL creds"
-            check_owner "$HOME_DIR/.secrets/postgres" "$SVC_USER" "PostgreSQL creds"
-        else
-            warn "PostgreSQL creds not found: ~/.secrets/postgres"
-        fi
-
-        # --- Gateway token (Part 4) ---
-        if [[ -f "$HOME_DIR/.secrets/gateway-token" ]]; then
-            pass "Gateway token exists: ~/.secrets/gateway-token"
-            check_perms "$HOME_DIR/.secrets/gateway-token" "600" "Gateway token"
-        else
-            warn "Gateway token not found: ~/.secrets/gateway-token"
-        fi
-
-        # --- File ownership audit ---
+        # Ownership audit
         BAD_OWNER=$(find "$HOME_DIR" -not -user "$SVC_USER" 2>/dev/null | head -5)
         if [[ -z "$BAD_OWNER" ]]; then
-            pass "File ownership: all files owned by $SVC_USER"
+            pass "File ownership: all owned by $SVC_USER"
         else
             fail "Files NOT owned by $SVC_USER:"
             echo "$BAD_OWNER" | while read -r f; do
@@ -457,137 +298,81 @@ else
                 echo "         $f (owned by $f_owner)"
             done
         fi
-
         echo ""
     done
 fi
 
-# Check for accidental .openclaw in admin homes
+# Accidental .openclaw
 for home in /home/*/; do
     user=$(basename "$home")
-    if [[ -d "$home/.openclaw" ]]; then
-        fail "Accidental .openclaw in /home/$user/ — should be removed"
-    fi
+    [[ -d "$home/.openclaw" ]] && fail "Accidental .openclaw in /home/$user/"
 done
 
+end_section "Service User"
+
+
 # =========================================================================
-section "=== DEPENDENCIES (Guide Parts 2-3) ==="
+begin_section "=== DEPENDENCIES ==="
 # =========================================================================
 
-# --- Node.js ---
+# Node.js
 if command -v node &>/dev/null; then
     NODE_VER=$(node --version 2>/dev/null)
-    if [[ "$NODE_VER" == v22* || "$NODE_VER" == v24* ]]; then
-        pass "Node.js: $NODE_VER"
-    else
-        warn "Node.js: $NODE_VER (expected v22.x or v24.x)"
-    fi
+    [[ "$NODE_VER" == v22* || "$NODE_VER" == v24* ]] && pass "Node.js: $NODE_VER" || warn "Node.js: $NODE_VER (expected v22/v24)"
 else
     fail "Node.js not installed"
 fi
 
-# --- Docker ---
+# Docker
 if command -v docker &>/dev/null; then
     pass "Docker installed"
-
-    if systemctl is-active --quiet docker 2>/dev/null; then
-        pass "Docker running"
-    else
-        warn "Docker not running"
-    fi
-
-    # daemon.json security
+    systemctl is-active --quiet docker 2>/dev/null && pass "Docker running" || warn "Docker not running"
     if [[ -f /etc/docker/daemon.json ]]; then
         pass "Docker daemon.json exists"
-
-        if grep -q '"no-new-privileges"' /etc/docker/daemon.json 2>/dev/null; then
-            pass "Docker: no-new-privileges configured"
-        else
-            warn "Docker: no-new-privileges not set in daemon.json"
-        fi
-
-        if grep -q '"live-restore"' /etc/docker/daemon.json 2>/dev/null; then
-            pass "Docker: live-restore configured"
-        else
-            warn "Docker: live-restore not set in daemon.json"
-        fi
+        grep -q '"no-new-privileges"' /etc/docker/daemon.json 2>/dev/null && pass "Docker: no-new-privileges" || warn "Docker: no-new-privileges not set"
+        grep -q '"live-restore"' /etc/docker/daemon.json 2>/dev/null && pass "Docker: live-restore" || warn "Docker: live-restore not set"
     else
-        warn "Docker: no daemon.json (using defaults)"
+        warn "Docker: no daemon.json"
     fi
-
-    # Users in docker group
     for SVC_USER in $DETECTED_USERS; do
-        if id -nG "$SVC_USER" 2>/dev/null | grep -qw docker; then
-            pass "Docker: $SVC_USER in docker group"
-        else
-            warn "Docker: $SVC_USER NOT in docker group"
-        fi
+        id -nG "$SVC_USER" 2>/dev/null | grep -qw docker && pass "Docker: $SVC_USER in group" || warn "Docker: $SVC_USER NOT in group"
     done
 else
     skip "Docker not installed (optional)"
 fi
 
-# --- PostgreSQL ---
+# PostgreSQL
 if command -v psql &>/dev/null; then
     pass "PostgreSQL installed"
-
-    if systemctl is-active --quiet postgresql 2>/dev/null; then
-        pass "PostgreSQL running"
-    else
-        warn "PostgreSQL not running"
-    fi
-
-    # Check for orbitguard database
-    if sudo -u postgres psql -lqt 2>/dev/null | cut -d '|' -f 1 | grep -qw orbitguard; then
-        pass "PostgreSQL: orbitguard database exists"
-    else
-        warn "PostgreSQL: orbitguard database not found"
-    fi
-
-    # Check for orbitguard user
-    if sudo -u postgres psql -c "\\du" 2>/dev/null | grep -qw orbitguard; then
-        pass "PostgreSQL: orbitguard user exists"
-    else
-        warn "PostgreSQL: orbitguard user not found"
-    fi
+    systemctl is-active --quiet postgresql 2>/dev/null && pass "PostgreSQL running" || warn "PostgreSQL not running"
+    sudo -u postgres psql -lqt 2>/dev/null | cut -d '|' -f 1 | grep -qw orbitguard && pass "PostgreSQL: orbitguard DB exists" || warn "PostgreSQL: orbitguard DB not found"
+    sudo -u postgres psql -c "\\du" 2>/dev/null | grep -qw orbitguard && pass "PostgreSQL: orbitguard user exists" || warn "PostgreSQL: orbitguard user not found"
 else
     skip "PostgreSQL not installed (optional)"
 fi
 
-# --- Nginx ---
+# Nginx
 if command -v nginx &>/dev/null; then
     pass "Nginx installed"
-
-    if systemctl is-active --quiet nginx 2>/dev/null; then
-        pass "Nginx running"
-    else
-        warn "Nginx not running"
-    fi
-
-    # Check service user write access to sites-available
+    systemctl is-active --quiet nginx 2>/dev/null && pass "Nginx running" || warn "Nginx not running"
     for SVC_USER in $DETECTED_USERS; do
         if [[ -d /etc/nginx/sites-available ]]; then
             SITES_GROUP=$(stat -c '%G' /etc/nginx/sites-available 2>/dev/null || stat -f '%Sg' /etc/nginx/sites-available 2>/dev/null)
-            if [[ "$SITES_GROUP" == "$SVC_USER" ]]; then
-                pass "Nginx: sites-available group owned by $SVC_USER"
-            else
-                warn "Nginx: sites-available group is $SITES_GROUP (expected $SVC_USER)"
-            fi
+            [[ "$SITES_GROUP" == "$SVC_USER" ]] && pass "Nginx: sites-available group=$SVC_USER" || warn "Nginx: sites-available group=$SITES_GROUP (expected $SVC_USER)"
         fi
     done
 else
     skip "Nginx not installed (optional)"
 fi
 
-# --- Chromium ---
+# Chromium
 if command -v chromium-browser &>/dev/null || command -v chromium &>/dev/null; then
-    CHROMIUM_PATH=$(command -v chromium-browser 2>/dev/null || command -v chromium 2>/dev/null)
-    pass "Chromium installed: $CHROMIUM_PATH"
+    pass "Chromium installed"
 else
-    skip "Chromium not installed (optional, needed for browser tools)"
+    skip "Chromium not installed (optional)"
 fi
 
-# --- OpenClaw CLI ---
+# OpenClaw CLI
 if command -v openclaw &>/dev/null; then
     OC_VER=$(openclaw --version 2>/dev/null || echo "unknown")
     pass "OpenClaw CLI: $OC_VER"
@@ -595,36 +380,22 @@ else
     fail "OpenClaw CLI not installed"
 fi
 
-# =========================================================================
-section "=== EXTERNAL APPS ==="
-# =========================================================================
+end_section "Dependencies"
 
-# --- Cloudflare Wrangler ---
-if command -v wrangler &>/dev/null; then
-    WRANGLER_VER=$(wrangler --version 2>/dev/null | head -1)
-    pass "Wrangler installed: $WRANGLER_VER"
-else
-    skip "Wrangler not installed (optional)"
-fi
-
-# --- Google Cloud CLI ---
-if command -v gcloud &>/dev/null; then
-    GCLOUD_VER=$(gcloud --version 2>/dev/null | head -1)
-    pass "Google Cloud CLI installed: $GCLOUD_VER"
-else
-    skip "Google Cloud CLI not installed (optional)"
-fi
-
-# --- GitHub CLI ---
-if command -v gh &>/dev/null; then
-    GH_VER=$(gh --version 2>/dev/null | head -1)
-    pass "GitHub CLI installed: $GH_VER"
-else
-    skip "GitHub CLI not installed (optional)"
-fi
 
 # =========================================================================
-section "=== OPENCLAW GATEWAY (Guide Part 4) ==="
+begin_section "=== EXTERNAL APPS ==="
+# =========================================================================
+
+command -v wrangler &>/dev/null && pass "Wrangler: $(wrangler --version 2>/dev/null | head -1)" || skip "Wrangler not installed (optional)"
+command -v gcloud &>/dev/null && pass "Google Cloud CLI: $(gcloud --version 2>/dev/null | head -1)" || skip "Google Cloud CLI not installed (optional)"
+command -v gh &>/dev/null && pass "GitHub CLI: $(gh --version 2>/dev/null | head -1)" || skip "GitHub CLI not installed (optional)"
+
+end_section "External Apps"
+
+
+# =========================================================================
+begin_section "=== OPENCLAW GATEWAY ==="
 # =========================================================================
 
 for SVC_USER in $DETECTED_USERS; do
@@ -634,126 +405,60 @@ for SVC_USER in $DETECTED_USERS; do
 
     echo -e "  ${BLUE}--- Checking gateway: $SVC_USER ---${NC}"
 
-    # --- Systemd service ---
+    # Systemd service
     if [[ -f "$SERVICE_FILE" ]]; then
-        pass "Systemd service file exists: $SERVICE"
-
-        # Service content validation
-        if grep -qE "^User=$SVC_USER" "$SERVICE_FILE" 2>/dev/null; then
-            pass "Service: User=$SVC_USER"
-        else
-            fail "Service: User= not set to $SVC_USER"
-        fi
-
-        if grep -q "openclaw gateway run" "$SERVICE_FILE" 2>/dev/null; then
-            pass "Service: ExecStart runs openclaw gateway"
-        else
-            fail "Service: ExecStart doesn't run openclaw gateway"
-        fi
-
-        if grep -qE "^NoNewPrivileges=false" "$SERVICE_FILE" 2>/dev/null; then
-            pass "Service: NoNewPrivileges=false (v2 unsandboxed)"
-        else
-            warn "Service: NoNewPrivileges not set to false (may break sudo)"
-        fi
-
-        if grep -q "ProtectSystem" "$SERVICE_FILE" 2>/dev/null; then
-            fail "Service: ProtectSystem still set (should be removed for v2)"
-        else
-            pass "Service: no ProtectSystem (v2 unsandboxed)"
-        fi
-
-        if grep -q "PrivateTmp=true" "$SERVICE_FILE" 2>/dev/null; then
-            pass "Service: PrivateTmp=true"
-        else
-            warn "Service: PrivateTmp not set"
-        fi
-
-        # Dependency on docker (if docker installed)
+        pass "Service file exists: $SERVICE"
+        grep -qE "^User=$SVC_USER" "$SERVICE_FILE" 2>/dev/null && pass "Service: User=$SVC_USER" || fail "Service: User= wrong"
+        grep -q "openclaw gateway run" "$SERVICE_FILE" 2>/dev/null && pass "Service: ExecStart correct" || fail "Service: ExecStart wrong"
+        grep -qE "^NoNewPrivileges=false" "$SERVICE_FILE" 2>/dev/null && pass "Service: NoNewPrivileges=false (v2)" || warn "Service: NoNewPrivileges not false"
+        grep -q "ProtectSystem" "$SERVICE_FILE" 2>/dev/null && fail "Service: ProtectSystem still set (remove for v2)" || pass "Service: no ProtectSystem (v2)"
+        grep -q "PrivateTmp=true" "$SERVICE_FILE" 2>/dev/null && pass "Service: PrivateTmp=true" || warn "Service: PrivateTmp not set"
         if command -v docker &>/dev/null; then
-            if grep -q "docker.service" "$SERVICE_FILE" 2>/dev/null; then
-                pass "Service: depends on docker.service"
-            else
-                warn "Service: no docker.service dependency (docker is installed)"
-            fi
+            grep -q "docker.service" "$SERVICE_FILE" 2>/dev/null && pass "Service: docker dependency" || warn "Service: no docker dependency"
         fi
-
-        if grep -q "tailscaled.service" "$SERVICE_FILE" 2>/dev/null; then
-            pass "Service: depends on tailscaled.service"
-        else
-            warn "Service: no tailscaled.service dependency"
-        fi
+        grep -q "tailscaled.service" "$SERVICE_FILE" 2>/dev/null && pass "Service: tailscale dependency" || warn "Service: no tailscale dependency"
     else
-        fail "Systemd service file missing: $SERVICE_FILE"
+        fail "Service file missing: $SERVICE_FILE"
     fi
 
-    # Service status
-    if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
-        pass "Service running"
-    else
-        warn "Service not running"
-    fi
+    systemctl is-active --quiet "$SERVICE" 2>/dev/null && pass "Service running" || warn "Service not running"
+    systemctl is-enabled --quiet "$SERVICE" 2>/dev/null && pass "Service enabled (auto-start)" || warn "Service not enabled"
 
-    if systemctl is-enabled --quiet "$SERVICE" 2>/dev/null; then
-        pass "Service enabled (auto-start on boot)"
-    else
-        warn "Service not enabled"
-    fi
-
-    # --- Config file ---
+    # Config
     if [[ -f "$OPENCLAW_DIR/openclaw.json" ]]; then
         pass "Config exists: openclaw.json"
         check_perms "$OPENCLAW_DIR/openclaw.json" "600" "openclaw.json"
         check_owner "$OPENCLAW_DIR/openclaw.json" "$SVC_USER" "openclaw.json"
 
-        # Bind address
-        if grep -q '"loopback"' "$OPENCLAW_DIR/openclaw.json" 2>/dev/null || \
-           grep -q '"127.0.0.1"' "$OPENCLAW_DIR/openclaw.json" 2>/dev/null; then
-            pass "Gateway bound to loopback (not exposed)"
-        else
-            fail "Gateway may be bound to 0.0.0.0 — check config!"
-        fi
+        (grep -q '"loopback"' "$OPENCLAW_DIR/openclaw.json" 2>/dev/null || grep -q '"127.0.0.1"' "$OPENCLAW_DIR/openclaw.json" 2>/dev/null) \
+            && pass "Gateway bound to loopback" || fail "Gateway may be on 0.0.0.0!"
 
-        # mDNS disabled
         if grep -q '"mdns"' "$OPENCLAW_DIR/openclaw.json" 2>/dev/null; then
-            if grep -q '"off"' "$OPENCLAW_DIR/openclaw.json" 2>/dev/null; then
-                pass "mDNS discovery disabled"
-            else
-                warn "mDNS may be enabled (check discovery.mdns.mode)"
-            fi
+            grep -q '"off"' "$OPENCLAW_DIR/openclaw.json" 2>/dev/null && pass "mDNS disabled" || warn "mDNS may be enabled"
         else
-            warn "mDNS config not found in openclaw.json"
+            warn "mDNS not configured"
         fi
 
-        # Log redaction
-        if grep -q '"redactSensitive"' "$OPENCLAW_DIR/openclaw.json" 2>/dev/null; then
-            pass "Log redaction configured"
-        else
-            warn "Log redaction not configured in openclaw.json"
-        fi
+        grep -q '"redactSensitive"' "$OPENCLAW_DIR/openclaw.json" 2>/dev/null && pass "Log redaction configured" || warn "Log redaction not configured"
     else
         fail "Config missing: $OPENCLAW_DIR/openclaw.json"
     fi
 
-    # --- Auth profiles ---
+    # Auth profiles
     AUTH_FILE="$OPENCLAW_DIR/agents/main/agent/auth-profiles.json"
     if [[ -f "$AUTH_FILE" ]]; then
-        pass "Auth profiles exist: auth-profiles.json"
+        pass "Auth profiles exist"
         check_perms "$AUTH_FILE" "600" "auth-profiles.json"
         check_owner "$AUTH_FILE" "$SVC_USER" "auth-profiles.json"
     else
-        warn "Auth profiles missing: $AUTH_FILE"
+        warn "Auth profiles missing"
     fi
 
-    # --- Port listening ---
+    # Port
     PORT=$(grep -o '"port": [0-9]*' "$OPENCLAW_DIR/openclaw.json" 2>/dev/null | grep -o '[0-9]*' || echo "18789")
-    if sudo ss -tlnp 2>/dev/null | grep -q ":${PORT} "; then
-        pass "Gateway listening on port $PORT"
-    else
-        warn "Gateway not listening on port $PORT"
-    fi
+    sudo ss -tlnp 2>/dev/null | grep -q ":${PORT} " && pass "Gateway listening on port $PORT" || warn "Gateway not listening on port $PORT"
 
-    # --- Workspace ---
+    # Workspace
     if [[ -d "$OPENCLAW_DIR/workspace" ]]; then
         pass "Workspace directory exists"
         check_owner "$OPENCLAW_DIR/workspace" "$SVC_USER" "Workspace"
@@ -764,8 +469,11 @@ for SVC_USER in $DETECTED_USERS; do
     echo ""
 done
 
+end_section "OpenClaw Gateway"
+
+
 # =========================================================================
-section "=== ARSENAL SERVICES (Guide Part 8) ==="
+begin_section "=== ARSENAL SERVICES ==="
 # =========================================================================
 
 ARSENAL_SERVICES=$(systemctl list-unit-files 'arsenal-*.service' --no-legend 2>/dev/null | awk '{print $1}' | sed 's/\.service//')
@@ -774,26 +482,18 @@ if [[ -z "$ARSENAL_SERVICES" ]]; then
     skip "No Arsenal services found"
 else
     for svc in $ARSENAL_SERVICES; do
-        if systemctl is-active --quiet "${svc}.service" 2>/dev/null; then
-            pass "Arsenal service running: $svc"
-        else
-            warn "Arsenal service not running: $svc"
-        fi
+        systemctl is-active --quiet "${svc}.service" 2>/dev/null && pass "Running: $svc" || warn "Not running: $svc"
     done
-
-    # Check nginx configs for Arsenal
     if [[ -d /etc/nginx/sites-available ]]; then
-        ARSENAL_CONFIGS=$(ls /etc/nginx/sites-available/arsenal* 2>/dev/null)
-        if [[ -n "$ARSENAL_CONFIGS" ]]; then
-            pass "Nginx Arsenal configs found"
-        else
-            warn "No Nginx Arsenal configs in sites-available"
-        fi
+        ls /etc/nginx/sites-available/arsenal* &>/dev/null && pass "Nginx Arsenal configs found" || warn "No Nginx Arsenal configs"
     fi
 fi
 
+end_section "Arsenal Services"
+
+
 # =========================================================================
-section "=== NETWORK ==="
+begin_section "=== NETWORK ==="
 # =========================================================================
 
 echo -e "  ${BLUE}Listening ports:${NC}"
@@ -810,12 +510,27 @@ sudo ss -tlnp 2>/dev/null | grep LISTEN | while read -r line; do
     fi
 done
 
+end_section "Network"
+
+
 # =========================================================================
-section "=== SUMMARY ==="
+# DASHBOARD
 # =========================================================================
+echo ""
+echo -e "${BOLD}================================================================${NC}"
+echo -e "${BOLD}  INSTALLATION STATUS DASHBOARD${NC}"
+echo -e "${BOLD}================================================================${NC}"
+echo ""
+
+# Print dashboard table
+for i in "${!DASHBOARD_NAMES[@]}"; do
+    printf "  %-22s %b  %s\n" "${DASHBOARD_NAMES[$i]}" "${DASHBOARD_STATUS[$i]}" "(${DASHBOARD_DETAIL[$i]})"
+done
+
+echo ""
+echo -e "${BOLD}----------------------------------------------------------------${NC}"
 
 TOTAL=$((PASS + FAIL + WARN + SKIP))
-
 echo ""
 echo -e "  ${GREEN}PASS: $PASS${NC}    ${RED}FAIL: $FAIL${NC}    ${YELLOW}WARN: $WARN${NC}    ${CYAN}SKIP: $SKIP${NC}    Total: $TOTAL"
 echo ""
@@ -825,9 +540,5 @@ if [[ $FAIL -eq 0 ]]; then
 else
     echo -e "  ${RED}${BOLD}$FAIL critical issue(s) found. Review FAIL items above.${NC}"
 fi
-
-if [[ $WARN -gt 0 ]]; then
-    echo -e "  ${YELLOW}$WARN warning(s) — review recommended but not blocking.${NC}"
-fi
-
+[[ $WARN -gt 0 ]] && echo -e "  ${YELLOW}$WARN warning(s) — review recommended but not blocking.${NC}"
 echo ""

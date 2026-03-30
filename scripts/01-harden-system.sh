@@ -242,9 +242,8 @@ if ! $DRY_RUN; then
     sudo tee /etc/systemd/resolved.conf >/dev/null <<'DNSEOF'
 [Resolve]
 DNS=9.9.9.9#dns.quad9.net 149.112.112.112#dns.quad9.net
-FallbackDNS=
+FallbackDNS=1.1.1.1 8.8.8.8
 DNSOverTLS=yes
-DNSSEC=yes
 Domains=~.
 DNSEOF
     sudo systemctl restart systemd-resolved
